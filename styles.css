@@ -172,6 +172,10 @@ h3 {
   border-color: var(--accent);
 }
 
+.watchlist-item.active {
+  background: rgba(100, 209, 137, 0.09);
+}
+
 .watchlist-item div {
   display: grid;
   gap: 2px;
@@ -195,12 +199,65 @@ h3 {
 .metric,
 .range-control,
 .category-row,
-.finding-topline,
-.timeline-heading {
+.finding-topline {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.timeline-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.timeline-heading-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.timeline-note {
+  min-width: 0;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.timeline-arrow {
+  flex: 0 0 auto;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #171b18;
+  color: var(--text);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.timeline-arrow:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.timeline-arrow:disabled {
+  cursor: not-allowed;
+  opacity: 0.35;
+}
+
+.timeline-shell:focus {
+  outline: none;
+}
+
+.timeline-shell:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
 }
 
 .metric,
@@ -237,6 +294,13 @@ h3 {
 .range-control {
   display: grid;
   grid-template-columns: 72px minmax(0, 1fr);
+}
+
+.zoom-readout {
+  margin-left: 6px;
+  color: var(--text);
+  font-style: normal;
+  font-weight: 600;
 }
 
 input[type="range"] {
@@ -415,6 +479,57 @@ input[type="range"] {
 
 .canvas-wrap.dragging {
   cursor: grabbing;
+}
+
+.analysis-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 14px;
+  padding: 24px;
+  background: rgba(8, 10, 9, 0.75);
+  backdrop-filter: blur(5px);
+  pointer-events: none;
+}
+
+.analysis-overlay.is-hidden {
+  display: none;
+}
+
+.analysis-orbit {
+  width: 56px;
+  height: 56px;
+  position: relative;
+}
+
+.analysis-plane-icon {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  margin: -11px 0 0 -11px;
+  font-size: 20px;
+  line-height: 1;
+  animation: plane-orbit 2.4s linear infinite;
+}
+
+@keyframes plane-orbit {
+  from {
+    transform: rotate(0deg) translateX(22px) rotate(0deg);
+  }
+
+  to {
+    transform: rotate(360deg) translateX(22px) rotate(-360deg);
+  }
+}
+
+.analysis-overlay-label {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
 }
 
 canvas {

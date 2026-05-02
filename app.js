@@ -2,8 +2,7 @@ const canvas = document.getElementById("imageCanvas");
 const ctx = canvas.getContext("2d");
 const airfieldSearch = document.getElementById("airfieldSearch");
 const watchlist = document.getElementById("watchlist");
-const overlayToggle = document.getElementById("overlayToggle");
-const opacitySlider = document.getElementById("opacitySlider");
+const boxesToggle = document.getElementById("boxesToggle");
 const resetView = document.getElementById("resetView");
 const refreshAnalysisBtn = document.getElementById("refreshAnalysis");
 const previousCapture = document.getElementById("previousCapture");
@@ -23,6 +22,14 @@ const signalList = document.getElementById("signalList");
 const findingsList = document.getElementById("findingsList");
 const timeline = document.getElementById("timeline");
 const timelineNote = document.getElementById("timelineNote");
+const timelinePrev = document.getElementById("timelinePrev");
+const timelineNext = document.getElementById("timelineNext");
+const analysisOverlay = document.getElementById("analysisOverlay");
+const zoomSlider = document.getElementById("zoomSlider");
+const zoomReadout = document.getElementById("zoomReadout");
+
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 4;
 
 const typeColors = {
   commercial: "#6fb6ff",
@@ -39,10 +46,11 @@ const state = {
   reportImage: null,
   reportImageUrl: "",
   captureIndex: -1,
-  overlayEnabled: true,
-  overlayOpacity: 0.55,
+  selectedAirportCode: "",
+  boxesEnabled: true,
   panX: 0,
   panY: 0,
+  zoom: 1,
   isDragging: false,
   lastPointer: null,
 };
@@ -62,6 +70,35 @@ function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
 }
 
+/** True when focus is in a control that uses ←/→ for editing or native UI (skip global date stepping). */
+function targetUsesHorizontalArrowsForEditing(target) {
+  const node = target?.nodeType === Node.TEXT_NODE ? target.parentElement : target;
+  if (!node?.closest) return false;
+  if (node.isContentEditable) return true;
+  const tag = node.tagName;
+  if (tag === "TEXTAREA") return true;
+  if (tag === "SELECT") return true;
+  if (tag === "INPUT") {
+    const t = (node.type || "text").toLowerCase();
+    return [
+      "text",
+      "search",
+      "password",
+      "email",
+      "url",
+      "tel",
+      "number",
+      "range",
+      "date",
+      "time",
+      "datetime-local",
+      "month",
+      "week",
+    ].includes(t);
+  }
+  return false;
+}
+
 /** Show YYYY-MM-DD for compact or legacy dates (e.g. 20260330 → 2026-03-30). */
 function formatCaptureDateForDisplay(value) {
   if (value == null || value === "") return "";
@@ -74,9 +111,22 @@ function formatCaptureDateForDisplay(value) {
   return s;
 }
 
+function syncZoomUi() {
+  if (zoomSlider) zoomSlider.value = String(state.zoom);
+  if (zoomReadout) zoomReadout.textContent = `${Math.round(state.zoom * 100)}%`;
+}
+
+function setAnalysisOverlay(visible) {
+  if (!analysisOverlay) return;
+  analysisOverlay.classList.toggle("is-hidden", !visible);
+  analysisOverlay.setAttribute("aria-hidden", visible ? "false" : "true");
+}
+
 function resetViewport() {
   state.panX = 0;
   state.panY = 0;
+  state.zoom = 1;
+  syncZoomUi();
   render();
 }
 
@@ -220,7 +270,7 @@ function getSelectedAnalysis(report) {
 }
 
 function drawReportOverlay(rect, report) {
-  if (!state.overlayEnabled || !report) return;
+  if (!state.boxesEnabled || !report) return;
   const capture = getSelectedCapture(report);
   const analysis = getSelectedAnalysis(report);
   if (!capture?.imageUrl || !analysis) return;
@@ -229,12 +279,9 @@ function drawReportOverlay(rect, report) {
   if (state.reportImageUrl !== capture.imageUrl) return;
 
   const aircraft = Array.isArray(analysis.planes) ? analysis.planes : [];
-  ctx.save();
-  ctx.globalAlpha = state.overlayOpacity;
   aircraft.forEach((plane) => {
     drawAircraftMarker(plane, rect, analysis, false);
   });
-  ctx.restore();
 }
 
 function getSceneRect() {
@@ -252,6 +299,10 @@ function getSceneRect() {
     sceneHeight = height * 0.86;
     sceneWidth = sceneHeight * sceneRatio;
   }
+
+  const z = clamp(state.zoom, MIN_ZOOM, MAX_ZOOM);
+  sceneWidth *= z;
+  sceneHeight *= z;
 
   return {
     x: (width - sceneWidth) / 2 + state.panX,
@@ -299,7 +350,7 @@ function renderWatchlist() {
   airfields.forEach((airfield) => {
     const button = document.createElement("button");
     button.className = "watchlist-item";
-    if (state.report?.id === airfield.id) button.classList.add("active");
+    if (normalizeAirportCode(airfield.code) === state.selectedAirportCode) button.classList.add("active");
     button.type = "button";
     button.innerHTML = `
       <div>
@@ -435,6 +486,11 @@ function renderTimeline(report) {
     column.insertAdjacentHTML("beforeend", `<span>${formatCaptureDateForDisplay(point.date)}</span>`);
     timeline.appendChild(column);
   });
+
+  requestAnimationFrame(() => {
+    const active = timeline.querySelector(".timeline-column--active");
+    active?.scrollIntoView({ inline: "nearest", block: "nearest", behavior: "smooth" });
+  });
 }
 
 function renderCaptureControls(report) {
@@ -450,6 +506,8 @@ function renderCaptureControls(report) {
     previousCapture.disabled = true;
     nextCapture.disabled = true;
     refreshAnalysisBtn.disabled = true;
+    if (timelinePrev) timelinePrev.disabled = true;
+    if (timelineNext) timelineNext.disabled = true;
     return;
   }
 
@@ -466,6 +524,8 @@ function renderCaptureControls(report) {
   previousCapture.disabled = index <= 0;
   nextCapture.disabled = index >= captures.length - 1;
   refreshAnalysisBtn.disabled = false;
+  if (timelinePrev) timelinePrev.disabled = previousCapture.disabled;
+  if (timelineNext) timelineNext.disabled = nextCapture.disabled;
 }
 
 function renderReportDetails() {
@@ -497,7 +557,7 @@ function renderReportDetails() {
   baselineSummary.textContent = report.baseline;
   viewerTitle.textContent = `${report.code} - ${report.name}`;
   viewerSubtitle.textContent = selectedCapture
-    ? `Local capture ${state.captureIndex + 1} of ${(report.images || []).length} with aircraft overlay`
+    ? `Local capture ${state.captureIndex + 1} of ${(report.images || []).length} with aircraft boxes`
     : "Synthetic placeholder imagery until local captures are supplied";
   riskBand.textContent = report.status;
   riskBand.className = `status-pill ${getSeverityClass(report.riskBand)}`;
@@ -549,17 +609,24 @@ function normalizeAirportCode(airportCode) {
 
 async function loadReport(airportCode, refreshAnalysis = false) {
   const normalizedAirportCode = normalizeAirportCode(airportCode);
-  const query = refreshAnalysis ? "?refresh=1" : "";
-  const response = await fetch(`/api/airfields/${encodeURIComponent(normalizedAirportCode)}${query}`);
-  if (!response.ok) throw new Error(`Unable to load ${normalizedAirportCode}`);
-  state.report = await response.json();
-  state.reportImage = null;
-  state.reportImageUrl = "";
-  state.captureIndex = (state.report.images || []).length - 1;
-  await loadSelectedReportImage();
-  resetViewport();
-  renderReportDetails();
-  render();
+  state.selectedAirportCode = normalizedAirportCode;
+  renderWatchlist();
+  setAnalysisOverlay(true);
+  try {
+    const query = refreshAnalysis ? "?refresh=1" : "";
+    const response = await fetch(`/api/airfields/${encodeURIComponent(normalizedAirportCode)}${query}`);
+    if (!response.ok) throw new Error(`Unable to load ${normalizedAirportCode}`);
+    state.report = await response.json();
+    state.reportImage = null;
+    state.reportImageUrl = "";
+    state.captureIndex = (state.report.images || []).length - 1;
+    await loadSelectedReportImage();
+    resetViewport();
+    renderReportDetails();
+    render();
+  } finally {
+    setAnalysisOverlay(false);
+  }
 }
 
 async function loadAirfields() {
@@ -576,18 +643,36 @@ airfieldSearch.addEventListener("keydown", (event) => {
   const airportCode = normalizeAirportCode(airfieldSearch.value);
   if (airportCode) loadReport(airportCode).catch(console.error);
 });
-overlayToggle.addEventListener("click", () => {
-  state.overlayEnabled = !state.overlayEnabled;
-  overlayToggle.classList.toggle("active", state.overlayEnabled);
-  render();
-});
-
-opacitySlider.addEventListener("input", () => {
-  state.overlayOpacity = Number(opacitySlider.value);
-  render();
-});
+if (boxesToggle) {
+  boxesToggle.addEventListener("click", () => {
+    state.boxesEnabled = !state.boxesEnabled;
+    boxesToggle.classList.toggle("active", state.boxesEnabled);
+    render();
+  });
+}
 
 resetView.addEventListener("click", resetViewport);
+
+if (zoomSlider) {
+  zoomSlider.addEventListener("input", () => {
+    state.zoom = clamp(Number(zoomSlider.value), MIN_ZOOM, MAX_ZOOM);
+    syncZoomUi();
+    render();
+  });
+}
+
+canvasWrap.addEventListener(
+  "wheel",
+  (event) => {
+    if (!state.report) return;
+    event.preventDefault();
+    const delta = event.deltaY > 0 ? -0.06 : 0.06;
+    state.zoom = clamp(state.zoom + delta, MIN_ZOOM, MAX_ZOOM);
+    syncZoomUi();
+    render();
+  },
+  { passive: false },
+);
 
 async function setCaptureIndex(index) {
   if (!state.report?.images?.length) return;
@@ -609,6 +694,31 @@ captureSelect.addEventListener("change", () => {
   setCaptureIndex(Number(captureSelect.value)).catch(console.error);
 });
 
+if (timelinePrev) {
+  timelinePrev.addEventListener("click", () => {
+    setCaptureIndex(state.captureIndex - 1).catch(console.error);
+  });
+}
+if (timelineNext) {
+  timelineNext.addEventListener("click", () => {
+    setCaptureIndex(state.captureIndex + 1).catch(console.error);
+  });
+}
+
+/** Capture phase so timeline horizontal scroll default loses to date stepping when applicable. */
+window.addEventListener(
+  "keydown",
+  (event) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    if (!state.report?.images?.length) return;
+    if (targetUsesHorizontalArrowsForEditing(event.target)) return;
+    event.preventDefault();
+    const delta = event.key === "ArrowLeft" ? -1 : 1;
+    setCaptureIndex(state.captureIndex + delta).catch(console.error);
+  },
+  true,
+);
+
 refreshAnalysisBtn.addEventListener("click", () => {
   const code = state.report?.code || normalizeAirportCode(airfieldSearch.value);
   if (!code) return;
@@ -617,6 +727,8 @@ refreshAnalysisBtn.addEventListener("click", () => {
   previousCapture.disabled = true;
   nextCapture.disabled = true;
   captureSelect.disabled = true;
+  if (timelinePrev) timelinePrev.disabled = true;
+  if (timelineNext) timelineNext.disabled = true;
   refreshAnalysisBtn.textContent = "Refreshing…";
   loadReport(code, true)
     .catch(console.error)
@@ -657,6 +769,7 @@ canvasWrap.addEventListener("pointercancel", () => {
 
 window.addEventListener("resize", resizeCanvas);
 resizeCanvas();
+syncZoomUi();
 loadAirfields().catch((error) => {
   summaryText.textContent = "Unable to load airfield reports.";
   console.error(error);

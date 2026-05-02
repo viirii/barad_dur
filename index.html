@@ -46,20 +46,28 @@
 
         <section class="panel">
           <div class="panel-row">
-            <span>Overlay</span>
-            <button id="overlayToggle" class="icon-button active" type="button" aria-label="Toggle overlay" title="Toggle overlay">
+            <span>Boxes</span>
+            <button id="boxesToggle" class="icon-button active" type="button" aria-label="Toggle boxes" title="Toggle boxes">
               <span class="toggle-dot"></span>
             </button>
           </div>
           <label class="range-control">
-            <span>Opacity</span>
-            <input id="opacitySlider" type="range" min="0" max="1" step="0.05" value="0.55" />
+            <span>Zoom <span id="zoomReadout" class="zoom-readout">100%</span></span>
+            <input
+              id="zoomSlider"
+              type="range"
+              min="0.25"
+              max="4"
+              step="0.05"
+              value="1"
+              aria-label="Zoom"
+            />
           </label>
           <div class="panel-row view-controls-row">
             <span>Pan</span>
             <div class="view-controls-actions">
               <button id="resetView" class="text-button view-reset-button" type="button">
-                Reset pan
+                Reset view
               </button>
             </div>
           </div>
@@ -70,7 +78,7 @@
         <div class="toolbar">
           <div class="toolbar-lede">
             <div class="file-name" id="viewerTitle">Select an airfield</div>
-            <div class="viewer-subtitle" id="viewerSubtitle">Latest imagery and aircraft overlay</div>
+            <div class="viewer-subtitle" id="viewerSubtitle">Latest imagery and aircraft boxes</div>
           </div>
           <div class="toolbar-actions">
             <button id="refreshAnalysis" class="text-button refresh-analysis-button" type="button" title="Re-run analysis on all captures and update cache" disabled>
@@ -84,12 +92,31 @@
 
         <div class="canvas-wrap" id="canvasWrap">
           <canvas id="imageCanvas"></canvas>
+          <div
+            id="analysisOverlay"
+            class="analysis-overlay is-hidden"
+            aria-hidden="true"
+            role="status"
+          >
+            <div class="analysis-orbit" aria-hidden="true">
+              <span class="analysis-plane-icon">✈</span>
+            </div>
+            <p class="analysis-overlay-label">Analysis in progress</p>
+          </div>
         </div>
 
-        <section class="timeline-shell">
+        <section class="timeline-shell" id="timelineShell" tabindex="0" aria-label="Aircraft timeline — ← → change capture date (except in text fields)">
           <div class="timeline-heading">
             <h2>Aircraft Type Timeline</h2>
-            <span id="timelineNote">No report loaded</span>
+            <div class="timeline-heading-nav">
+              <button id="timelinePrev" type="button" class="timeline-arrow" aria-label="Previous capture date">
+                ←
+              </button>
+              <span id="timelineNote" class="timeline-note">No report loaded</span>
+              <button id="timelineNext" type="button" class="timeline-arrow" aria-label="Next capture date">
+                →
+              </button>
+            </div>
           </div>
           <div id="timeline" class="timeline"></div>
         </section>
