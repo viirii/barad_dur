@@ -1,0 +1,130 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Barad-dûr</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">B</div>
+          <div>
+            <h1>Barad-dûr</h1>
+            <p>Airfield aircraft monitoring</p>
+          </div>
+        </div>
+
+        <section class="panel search-panel">
+          <label class="field-control">
+            <span>Airport code</span>
+            <input id="airfieldSearch" type="search" placeholder="Enter SFO, SUU, ICN" />
+          </label>
+          <div id="watchlist" class="watchlist"></div>
+        </section>
+
+        <section class="panel">
+          <div class="section-heading">
+            <h2>Monitor</h2>
+            <span id="selectedCode" class="status-pill neutral">--</span>
+          </div>
+          <div class="metric">
+            <span>Airfield type</span>
+            <strong id="airfieldType">Waiting</strong>
+          </div>
+          <div class="metric">
+            <span>Last capture</span>
+            <strong id="lastCapture">Waiting</strong>
+          </div>
+          <div class="metric">
+            <span>Baseline</span>
+            <strong id="baselineSummary">Waiting</strong>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-row">
+            <span>Overlay</span>
+            <button id="overlayToggle" class="icon-button active" type="button" aria-label="Toggle overlay" title="Toggle overlay">
+              <span class="toggle-dot"></span>
+            </button>
+          </div>
+          <label class="range-control">
+            <span>Opacity</span>
+            <input id="opacitySlider" type="range" min="0" max="1" step="0.05" value="0.55" />
+          </label>
+          <div class="panel-row view-controls-row">
+            <span>Pan</span>
+            <div class="view-controls-actions">
+              <button id="resetView" class="text-button view-reset-button" type="button">
+                Reset pan
+              </button>
+            </div>
+          </div>
+        </section>
+      </aside>
+
+      <section class="viewer-shell">
+        <div class="toolbar">
+          <div class="toolbar-lede">
+            <div class="file-name" id="viewerTitle">Select an airfield</div>
+            <div class="viewer-subtitle" id="viewerSubtitle">Latest imagery and aircraft overlay</div>
+          </div>
+          <div class="toolbar-actions">
+            <button id="refreshAnalysis" class="text-button refresh-analysis-button" type="button" title="Re-run analysis on all captures and update cache" disabled>
+              Refresh analysis
+            </button>
+            <button id="previousCapture" class="text-button" type="button">Prev date</button>
+            <select id="captureSelect" class="capture-select" aria-label="Capture date"></select>
+            <button id="nextCapture" class="text-button" type="button">Next date</button>
+          </div>
+        </div>
+
+        <div class="canvas-wrap" id="canvasWrap">
+          <canvas id="imageCanvas"></canvas>
+        </div>
+
+        <section class="timeline-shell">
+          <div class="timeline-heading">
+            <h2>Aircraft Type Timeline</h2>
+            <span id="timelineNote">No report loaded</span>
+          </div>
+          <div id="timeline" class="timeline"></div>
+        </section>
+      </section>
+
+      <aside class="inspector">
+        <section class="panel">
+          <div class="section-heading">
+            <h2>Activity Summary</h2>
+            <span id="riskBand" class="status-pill neutral">Waiting</span>
+          </div>
+          <p id="summaryText" class="summary-text">Enter an airport code to generate a monitoring report.</p>
+        </section>
+
+        <section class="panel">
+          <h2>Latest Composition</h2>
+          <div id="compositionGrid" class="composition-grid"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Change Signals</h2>
+          <div id="signalList" class="category-list">
+            <div class="empty-copy">No report loaded.</div>
+          </div>
+        </section>
+
+        <section class="panel findings-panel">
+          <h2>Key Findings</h2>
+          <div id="findingsList" class="findings-list">
+            <div class="empty-copy">Flagged regions will appear here.</div>
+          </div>
+        </section>
+      </aside>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

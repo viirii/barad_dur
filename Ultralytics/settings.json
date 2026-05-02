@@ -1,0 +1,21 @@
+{
+  "settings_version": "0.0.6",
+  "datasets_dir": "/Users/christinebaek/git/barad_dur/datasets",
+  "weights_dir": "/Users/christinebaek/git/barad_dur/weights",
+  "runs_dir": "/Users/christinebaek/git/barad_dur/runs",
+  "uuid": "287f390c964f0dc3311684f0154465fa9854ae0704b554c4a2cca7e3dc6c1a2f",
+  "sync": true,
+  "api_key": "",
+  "openai_api_key": "",
+  "clearml": true,
+  "comet": true,
+  "dvc": true,
+  "hub": true,
+  "mlflow": true,
+  "neptune": true,
+  "raytune": true,
+  "tensorboard": false,
+  "wandb": false,
+  "vscode_msg": true,
+  "openvino_msg": true
+}

@@ -1,0 +1,17 @@
+{
+  "name": "barad-dur",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Self-hosted aircraft and drone imagery triage prototype.",
+  "scripts": {
+    "start": "node server.js",
+    "check": "node --check app.js && node --check server.js",
+    "setup-detect": "python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements-detect.txt"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5"
+  }
+}

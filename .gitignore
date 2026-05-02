@@ -1,0 +1,9 @@
+.DS_Store
+.env
+.env.*
+!.env.example
+.venv/
+.matplotlib-cache/
+third_party/yolov9/
+data/
+datas/

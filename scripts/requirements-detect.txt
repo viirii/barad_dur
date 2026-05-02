@@ -1,0 +1,6 @@
+huggingface_hub>=0.20.0
+ultralytics>=8.2.0
+torch>=2.0.0
+# YOLOv9 checkpoints (e.g. Efficient-YOLO-RS) unpickle `models.common` which imports these:
+pandas>=2.0
+seaborn>=0.13
