@@ -1,4 +1,5 @@
 .DS_Store
+# Local secrets (OPENAI_API_KEY, etc.): only `.env`, never commit — tracked defaults stay in `.env.example`.
 .env
 .env.*
 !.env.example

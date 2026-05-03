@@ -7,23 +7,15 @@ Reads local image paths from argv, prints JSON to stdout only:
   { "<resolved_path>": { "detections": [ ... ] }, ... }
 
 Env:
-  HF_AIRCRAFT_QUICK  — set to 1 for fast pipeline debugging: Ultralytics COCO `yolov8n.pt` (no HF Hub / YOLOv9 deps),
-                         smaller letterbox (1280), lower imgsz_max (4096). Use to verify boxes appear at all.
-  HF_AIRCRAFT_REPO   — Hugging Face repo id (default: iturslab/Efficient-YOLO-RS-Airplane-Detection); ignored when QUICK=1 unless you override WEIGHTS.
-  HF_AIRCRAFT_WEIGHTS — HF path inside repo (default: training/experiment-61/best.pt), or when QUICK=1 default `yolov8n.pt`
-  HF_AIRCRAFT_IMGSZ     — `native` (default): use each image's long edge as inference size (local full-res up to cap).
-                           Or a fixed integer (e.g. 2048) for letterbox / tile size.
-  HF_AIRCRAFT_IMGSZ_MAX — max long-edge pixels when IMGSZ=native (default: 16384). Larger images use tiling or downscale.
-  HF_AIRCRAFT_CONF      — confidence threshold (default: 0.001). Ultralytics default conf filter is high — keep low for recall.
-  HF_AIRCRAFT_IOU       — NMS IoU during predict (default: 0.45). Lower = merge fewer overlapping boxes (dense parking).
-  HF_AIRCRAFT_MAX_DET   — max boxes per tile / full image (default: 500).
-  HF_AIRCRAFT_TILE      — 1 (default): if image exceeds IMGSZ_MAX, slide overlapping tiles; 0: single pass scaled to cap only.
-  HF_AIRCRAFT_TILE_OVERLAP — overlap between tiles (default: 0.40; higher = fewer misses at seams, more compute)
-  HF_AIRCRAFT_AUGMENT   — 0 (default): set 1 for TTA (slower; some checkpoints behave badly with augment).
-  HF_DETECT_DEBUG       — set to 1 to print dtype/shape/detections to stderr (progress debugging).
-  YOLOV9_REPO (optional) — path to a WongKinYiu/yolov9 clone (must contain models/common.py).
-        Default: <barad_dur>/third_party/yolov9. Required for Efficient-YOLO-RS weights (YOLOv9 pickles use `models.*`).
-  MPLCONFIGDIR — optional; server sets this to <repo>/.matplotlib-cache when spawned from Node.
+  Defaults live only in repo-root `.env.example` (optional `.env` overrides). This script loads those files at startup
+  with the same order as server.js: `.env.example` first, then `.env` overwrites. Pass-through env (e.g. from the
+  Node-spawned child process) is left unchanged except for missing keys filled from those files.
+
+  HF_AIRCRAFT_QUICK — 1 uses HF_AIRCRAFT_QUICK_* keys (COCO yolov8n); 0 uses HF_AIRCRAFT_REPO / HF_AIRCRAFT_WEIGHTS / …
+  HF_QUICK_KEEP_CLASSES — quick mode only: comma-separated COCO names or ids; `all` or `*` disables class filtering.
+  HF_DETECT_DEBUG — set to 1 for stderr diagnostics.
+  YOLOV9_REPO (optional) — WongKinYiu/yolov9 clone path (models/common.py). Default: <repo>/third_party/yolov9.
+  MPLCONFIGDIR — optional; server may set this for matplotlib cache.
 """
 
 from __future__ import annotations
@@ -36,6 +28,52 @@ import sys
 import types
 from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
+
+
+def _merge_dotenv_file(path: Path, *, override_existing: bool) -> None:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.lower().startswith("export "):
+            line = line[7:].strip()
+        if "=" not in line:
+            continue
+        key, _, val = line.partition("=")
+        key = key.strip()
+        val = val.strip()
+        if len(val) >= 2 and val[0] == val[-1] and val[0] in "\"'":
+            val = val[1:-1]
+        if override_existing:
+            os.environ[key] = val
+        else:
+            os.environ.setdefault(key, val)
+
+
+def _hydrate_env_from_dotenv_files() -> None:
+    """Match server.js: `.env.example` then `.env` (override)."""
+    root = Path(__file__).resolve().parents[1]
+    example = root / ".env.example"
+    local = root / ".env"
+    if example.is_file():
+        _merge_dotenv_file(example, override_existing=False)
+    if local.is_file():
+        _merge_dotenv_file(local, override_existing=True)
+
+
+def _env(key: str) -> str:
+    v = os.environ.get(key)
+    if v is None or v == "":
+        print(
+            json.dumps({"error": f"missing env {key}; copy defaults from repo .env.example"}),
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return v
 
 
 def _ensure_bgr_uint8(im_bgr):
@@ -125,6 +163,119 @@ def _stride_up(n: int, stride: int = 32) -> int:
     return max(stride, ((max(n, 1) + stride - 1) // stride) * stride)
 
 
+def _model_class_id_to_name(model) -> dict[int, str]:
+    names = getattr(model, "names", None) or {}
+    out: dict[int, str] = {}
+    if isinstance(names, dict):
+        for k, v in names.items():
+            try:
+                out[int(k)] = str(v)
+            except (TypeError, ValueError):
+                continue
+    elif isinstance(names, (list, tuple)):
+        for i, v in enumerate(names):
+            out[i] = str(v)
+    return out
+
+
+def resolve_quick_keep_class_ids(model) -> frozenset[int] | None:
+    """Quick + COCO only: restrict outputs to these class indices. None = no filter (all 80 COCO classes)."""
+    raw = _env("HF_QUICK_KEEP_CLASSES").strip()
+    if raw.lower() in ("*", "all"):
+        return None
+    id_to_name = _model_class_id_to_name(model)
+    keep: set[int] = set()
+    for token in [t.strip() for t in raw.split(",") if t.strip()]:
+        if token.isdigit():
+            keep.add(int(token))
+            continue
+        tl = token.lower()
+        for cid, nm in id_to_name.items():
+            if nm.lower() == tl:
+                keep.add(cid)
+                break
+    if not keep:
+        for cid, nm in id_to_name.items():
+            if nm.lower() == "airplane":
+                keep.add(cid)
+        if not keep:
+            keep.add(4)
+            print(
+                "[hf:quick] HF_QUICK_KEEP_CLASSES matched nothing and no 'airplane' in model.names — "
+                "using COCO airplane index 4",
+                file=sys.stderr,
+            )
+    return frozenset(keep)
+
+
+def _detections_from_yolo_result(
+    r,
+    image_w: int,
+    image_h: int,
+    keep_cls: frozenset[int] | None,
+    max_area_frac: float | None,
+) -> list[dict]:
+    """Turn one Ultralytics Results object into normalized bbox dicts (optional class filter)."""
+    if r.boxes is None or len(r.boxes) == 0:
+        return []
+    xyxy = r.boxes.xyxy.cpu().numpy()
+    scores = r.boxes.conf.cpu().numpy()
+    cls_arr = r.boxes.cls.cpu().numpy() if r.boxes.cls is not None else None
+    if keep_cls is not None and cls_arr is None:
+        return []
+    fw = float(max(image_w, 1))
+    fh = float(max(image_h, 1))
+    out: list[dict] = []
+    for i in range(len(xyxy)):
+        if keep_cls is not None and cls_arr is not None:
+            if int(cls_arr[i]) not in keep_cls:
+                continue
+        x1, y1, x2, y2 = xyxy[i].tolist()
+        score = float(scores[i])
+        out.append(
+            {
+                "bbox": {
+                    "x": x1 / fw,
+                    "y": y1 / fh,
+                    "width": (x2 - x1) / fw,
+                    "height": (y2 - y1) / fh,
+                },
+                "detectionConfidence": max(0.0, min(1.0, score)),
+                "angle": 0,
+            }
+        )
+    return _apply_max_area_filter(out, max_area_frac)
+
+
+def _resolve_max_box_area_frac() -> float | None:
+    """Optional cap on normalized bbox area (width×height); None = disabled."""
+    raw = _env("HF_AIRCRAFT_MAX_BOX_AREA").strip().lower()
+    if raw in ("none", "off", "disable", "1", "1.0"):
+        return None
+    try:
+        v = float(raw)
+    except ValueError as e:
+        raise ValueError(f"HF_AIRCRAFT_MAX_BOX_AREA must be a number or 1/off; got {raw!r}") from e
+    if v >= 1.0:
+        return None
+    if v <= 0:
+        return None
+    return v
+
+
+def _apply_max_area_filter(detections: list[dict], max_frac: float | None) -> list[dict]:
+    if max_frac is None:
+        return detections
+    kept: list[dict] = []
+    for d in detections:
+        bbox = d.get("bbox") or {}
+        w = float(bbox.get("width") or 0)
+        h = float(bbox.get("height") or 0)
+        if w * h <= max_frac:
+            kept.append(d)
+    return kept
+
+
 def _resolve_inference_plan(
     full_w: int,
     full_h: int,
@@ -163,6 +314,9 @@ def _predict_tiled_bgr(
     tile_sz: int,
     overlap: float,
     predict_kw: dict,
+    keep_cls: frozenset[int] | None,
+    merge_iou: float,
+    max_area_frac: float | None,
 ) -> list[dict]:
     """Run YOLO on overlapping crops in original pixel space; merge with NMS."""
     overlap = min(max(overlap, 0.0), 0.9)
@@ -188,7 +342,13 @@ def _predict_tiled_bgr(
                 continue
             xyxy = r.boxes.xyxy.cpu().numpy()
             sc = r.boxes.conf.cpu().numpy()
+            cls_arr = r.boxes.cls.cpu().numpy() if r.boxes.cls is not None else None
+            if keep_cls is not None and cls_arr is None:
+                continue
             for k in range(len(xyxy)):
+                if keep_cls is not None and cls_arr is not None:
+                    if int(cls_arr[k]) not in keep_cls:
+                        continue
                 bx1, by1, bx2, by2 = xyxy[k].tolist()
                 scv = float(sc[k])
                 all_xyxy.append((bx1 + x0, by1 + y0, bx2 + x0, by2 + y0))
@@ -197,7 +357,7 @@ def _predict_tiled_bgr(
     if not all_xyxy:
         return []
 
-    keep = _nms_xyxy(all_xyxy, all_scores, iou_threshold=0.45)
+    keep = _nms_xyxy(all_xyxy, all_scores, iou_threshold=merge_iou)
     out: list[dict] = []
     fw, fh = float(full_w), float(full_h)
     for idx in keep:
@@ -215,7 +375,7 @@ def _predict_tiled_bgr(
                 "angle": 0,
             }
         )
-    return out
+    return _apply_max_area_filter(out, max_area_frac)
 
 
 def _configure_matplotlib_cache() -> None:
@@ -310,46 +470,48 @@ def _patch_yolov9_ultralytics_api(model) -> None:
     orig_forward = inner.forward
 
     def forward_shim(self, x, augment=False, profile=False, visualize=False, **kwargs):
+        """Ultralytics expects a single prediction tensor; YOLOv9 Detect returns (pred, feature_list)."""
         kwargs.pop("embed", None)
-        return orig_forward(x, augment=augment, profile=profile, visualize=visualize)
+        kwargs.pop("distilled", None)
+        out = orig_forward(x, augment=augment, profile=profile, visualize=visualize)
+        if isinstance(out, tuple) and len(out) >= 1:
+            return out[0]
+        return out
 
     inner.forward = types.MethodType(forward_shim, inner)
 
 
 def main() -> None:
+    _hydrate_env_from_dotenv_files()
     paths = [Path(p) for p in sys.argv[1:] if p.strip()]
     if not paths:
         print(json.dumps({"error": "no image paths"}), file=sys.stderr)
         sys.exit(2)
 
-    quick = os.environ.get("HF_AIRCRAFT_QUICK", "").strip() == "1"
+    quick = _env("HF_AIRCRAFT_QUICK").strip() == "1"
+
+    conf = float(_env("HF_AIRCRAFT_CONF"))
+    tile_enabled = _env("HF_AIRCRAFT_TILE").strip() != "0"
+    use_augment = _env("HF_AIRCRAFT_AUGMENT").strip() != "0"
 
     if quick:
-        weights_rel = os.environ.get("HF_AIRCRAFT_WEIGHTS") or "yolov8n.pt"
-        imgsz_env = (os.environ.get("HF_AIRCRAFT_IMGSZ") or "1280").strip()
-        imgsz_max = int(os.environ.get("HF_AIRCRAFT_IMGSZ_MAX") or "4096")
-        tile_enabled = (os.environ.get("HF_AIRCRAFT_TILE") or "1").strip() != "0"
-        tile_overlap = float(os.environ.get("HF_AIRCRAFT_TILE_OVERLAP") or "0.25")
-        conf = float(os.environ.get("HF_AIRCRAFT_CONF") or "0.15")
-        iou = float(os.environ.get("HF_AIRCRAFT_IOU") or "0.5")
-        max_det = int(os.environ.get("HF_AIRCRAFT_MAX_DET") or "300")
-        use_augment = (os.environ.get("HF_AIRCRAFT_AUGMENT") or "0").strip() != "0"
+        weights_rel = _env("HF_AIRCRAFT_QUICK_WEIGHTS")
+        imgsz_env = _env("HF_AIRCRAFT_QUICK_IMGSZ").strip()
+        imgsz_max = int(_env("HF_AIRCRAFT_QUICK_IMGSZ_MAX"))
+        tile_overlap = float(_env("HF_AIRCRAFT_QUICK_TILE_OVERLAP"))
+        iou = float(_env("HF_AIRCRAFT_QUICK_IOU"))
+        max_det = int(_env("HF_AIRCRAFT_QUICK_MAX_DET"))
+        merge_iou = float(_env("HF_AIRCRAFT_QUICK_TILE_MERGE_IOU"))
         repo = ""
     else:
-        repo = os.environ.get(
-            "HF_AIRCRAFT_REPO", "iturslab/Efficient-YOLO-RS-Airplane-Detection"
-        )
-        weights_rel = os.environ.get(
-            "HF_AIRCRAFT_WEIGHTS", "training/experiment-61/best.pt"
-        )
-        imgsz_env = os.environ.get("HF_AIRCRAFT_IMGSZ", "native").strip()
-        imgsz_max = int(os.environ.get("HF_AIRCRAFT_IMGSZ_MAX", "16384"))
-        tile_enabled = os.environ.get("HF_AIRCRAFT_TILE", "1").strip() != "0"
-        tile_overlap = float(os.environ.get("HF_AIRCRAFT_TILE_OVERLAP", "0.40"))
-        conf = float(os.environ.get("HF_AIRCRAFT_CONF", "0.001"))
-        iou = float(os.environ.get("HF_AIRCRAFT_IOU", "0.45"))
-        max_det = int(os.environ.get("HF_AIRCRAFT_MAX_DET", "500"))
-        use_augment = os.environ.get("HF_AIRCRAFT_AUGMENT", "0").strip() != "0"
+        repo = _env("HF_AIRCRAFT_REPO")
+        weights_rel = _env("HF_AIRCRAFT_WEIGHTS")
+        imgsz_env = _env("HF_AIRCRAFT_IMGSZ").strip()
+        imgsz_max = int(_env("HF_AIRCRAFT_IMGSZ_MAX"))
+        tile_overlap = float(_env("HF_AIRCRAFT_TILE_OVERLAP"))
+        iou = float(_env("HF_AIRCRAFT_IOU"))
+        max_det = int(_env("HF_AIRCRAFT_MAX_DET"))
+        merge_iou = float(_env("HF_AIRCRAFT_TILE_MERGE_IOU"))
     predict_kw = {
         "conf": conf,
         "iou": iou,
@@ -386,12 +548,26 @@ def main() -> None:
             model = YOLO(model_path)
             _patch_yolov9_ultralytics_api(model)
 
+    keep_cls: frozenset[int] | None = None
     if quick:
-        print(
-            "[hf:quick] Ultralytics COCO weights (default yolov8n.pt) — fast pipeline check; "
-            "HF_AIRCRAFT_QUICK=0 restores Efficient-YOLO-RS.",
-            file=sys.stderr,
-        )
+        keep_cls = resolve_quick_keep_class_ids(model)
+        id_to_name = _model_class_id_to_name(model)
+        if keep_cls is None:
+            print(
+                "[hf:quick] COCO yolov8n — class filter off (HF_QUICK_KEEP_CLASSES=all); "
+                "all COCO categories may appear.",
+                file=sys.stderr,
+            )
+        else:
+            labs = [id_to_name.get(i, "?") for i in sorted(keep_cls)]
+            print(
+                "[hf:quick] COCO yolov8n — detection uses only "
+                f"{sorted(keep_cls)} ({', '.join(labs)}). "
+                "HF_AIRCRAFT_QUICK=0 uses Efficient-YOLO-RS airplane weights.",
+                file=sys.stderr,
+            )
+
+    max_box_area_frac = _resolve_max_box_area_frac()
 
     try:
         import cv2
@@ -437,6 +613,9 @@ def main() -> None:
                         tile_sz,
                         tile_overlap,
                         predict_kw,
+                        keep_cls,
+                        merge_iou,
+                        max_box_area_frac,
                     )
                 else:
                     results = model.predict(im_bgr, imgsz=single_imgsz, **predict_kw)
@@ -447,26 +626,14 @@ def main() -> None:
                         h, w = r.orig_shape if r.orig_shape is not None else (1, 1)
                         if not h or not w:
                             detections = []
-                        elif r.boxes is None or len(r.boxes) == 0:
-                            detections = []
                         else:
-                            xyxy = r.boxes.xyxy.cpu().numpy()
-                            scores = r.boxes.conf.cpu().numpy()
-                            for i in range(len(xyxy)):
-                                x1, y1, x2, y2 = xyxy[i].tolist()
-                                score = float(scores[i])
-                                detections.append(
-                                    {
-                                        "bbox": {
-                                            "x": x1 / w,
-                                            "y": y1 / h,
-                                            "width": (x2 - x1) / w,
-                                            "height": (y2 - y1) / h,
-                                        },
-                                        "detectionConfidence": max(0.0, min(1.0, score)),
-                                        "angle": 0,
-                                    }
-                                )
+                            detections = _detections_from_yolo_result(
+                                r,
+                                w,
+                                h,
+                                keep_cls,
+                                max_box_area_frac,
+                            )
             if os.environ.get("HF_DETECT_DEBUG", "").strip() == "1":
                 isz = tile_sz if mode == "tile" and tile_sz is not None else single_imgsz
                 print(

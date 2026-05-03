@@ -19,10 +19,14 @@
 
         <section class="panel search-panel">
           <label class="field-control">
-            <span>Airport code</span>
-            <input id="airfieldSearch" type="search" placeholder="Enter SFO, SUU, ICN" />
+            <span>Airport</span>
+            <select id="airfieldSelect" class="airfield-select" aria-label="Airport">
+              <option value="suu">SUU — Travis AFB</option>
+              <option value="sfo">SFO — San Francisco</option>
+              <option value="sfx">SFX — SFO mirror (demo)</option>
+              <option value="oak" selected>OAK — Oakland</option>
+            </select>
           </label>
-          <div id="watchlist" class="watchlist"></div>
         </section>
 
         <section class="panel">
@@ -84,6 +88,9 @@
             <button id="refreshAnalysis" class="text-button refresh-analysis-button" type="button" title="Re-run analysis on all captures and update cache" disabled>
               Refresh analysis
             </button>
+            <button id="reclassifyAnalysis" class="text-button reclassify-analysis-button" type="button" title="Re-run OpenAI classification only using cached HF boxes (no YOLO)" disabled>
+              Reclassify
+            </button>
             <button id="previousCapture" class="text-button" type="button">Prev date</button>
             <select id="captureSelect" class="capture-select" aria-label="Capture date"></select>
             <button id="nextCapture" class="text-button" type="button">Next date</button>
@@ -98,10 +105,15 @@
             aria-hidden="true"
             role="status"
           >
-            <div class="analysis-orbit" aria-hidden="true">
-              <span class="analysis-plane-icon">✈</span>
+            <div id="analysisPendingBackdropWrap" class="analysis-pending-backdrop-wrap is-empty" aria-hidden="true">
+              <img id="analysisPendingBackdrop" class="analysis-pending-backdrop" alt="" decoding="async" />
             </div>
-            <p class="analysis-overlay-label">Analysis in progress</p>
+            <div class="analysis-overlay-center">
+              <div class="analysis-orbit" aria-hidden="true">
+                <span class="analysis-plane-icon">✈</span>
+              </div>
+              <p id="analysisOverlayLabel" class="analysis-overlay-label">Analysis in progress</p>
+            </div>
           </div>
         </div>
 
@@ -128,7 +140,7 @@
             <h2>Activity Summary</h2>
             <span id="riskBand" class="status-pill neutral">Waiting</span>
           </div>
-          <p id="summaryText" class="summary-text">Enter an airport code to generate a monitoring report.</p>
+          <p id="summaryText" class="summary-text">Select an airport to generate a monitoring report.</p>
         </section>
 
         <section class="panel">

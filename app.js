@@ -1,10 +1,10 @@
 const canvas = document.getElementById("imageCanvas");
 const ctx = canvas.getContext("2d");
-const airfieldSearch = document.getElementById("airfieldSearch");
-const watchlist = document.getElementById("watchlist");
+const airfieldSelect = document.getElementById("airfieldSelect");
 const boxesToggle = document.getElementById("boxesToggle");
 const resetView = document.getElementById("resetView");
 const refreshAnalysisBtn = document.getElementById("refreshAnalysis");
+const reclassifyAnalysisBtn = document.getElementById("reclassifyAnalysis");
 const previousCapture = document.getElementById("previousCapture");
 const nextCapture = document.getElementById("nextCapture");
 const captureSelect = document.getElementById("captureSelect");
@@ -31,14 +31,37 @@ const zoomReadout = document.getElementById("zoomReadout");
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;
 
+/** Align with server `normalizeClassificationString`: commercial | cargo | military; legacy maps into these. */
+function canonicalPlaneCategory(raw) {
+  const v = String(raw ?? "").trim().toLowerCase();
+  if (v === "military") return "military";
+  if (v === "cargo") return "cargo";
+  if (v === "commercial") return "commercial";
+  if (v === "civilian" || v === "private" || v === "business" || v === "helicopter" || v === "unknown") {
+    return "commercial";
+  }
+  return "commercial";
+}
+
+const COMPOSITION_ORDER = ["commercial", "cargo", "military"];
+
 const typeColors = {
   commercial: "#6fb6ff",
   cargo: "#a8d66d",
-  business: "#d7b4ff",
   military: "#ff8b72",
-  helicopter: "#ffd36e",
-  unknown: "#c3c8c1",
 };
+
+/** Roll mixed/legacy timeline rows into the three display buckets. */
+function aggregateTimelinePoint(point) {
+  const acc = { commercial: 0, cargo: 0, military: 0 };
+  for (const [key, val] of Object.entries(point)) {
+    if (key === "date") continue;
+    const n = Number(val) || 0;
+    if (!n) continue;
+    acc[canonicalPlaneCategory(key)] += n;
+  }
+  return acc;
+}
 
 const state = {
   airfields: [],
@@ -116,10 +139,41 @@ function syncZoomUi() {
   if (zoomReadout) zoomReadout.textContent = `${Math.round(state.zoom * 100)}%`;
 }
 
+const analysisPendingBackdropWrap = document.getElementById("analysisPendingBackdropWrap");
+const analysisPendingBackdrop = document.getElementById("analysisPendingBackdrop");
+const analysisOverlayLabel = document.getElementById("analysisOverlayLabel");
+
 function setAnalysisOverlay(visible) {
   if (!analysisOverlay) return;
   analysisOverlay.classList.toggle("is-hidden", !visible);
   analysisOverlay.setAttribute("aria-hidden", visible ? "false" : "true");
+}
+
+/** Latest capture as full-area blurred backdrop while analysis runs (`/api/airfields/:code/images` order is oldest→newest). */
+function renderAnalysisPendingBackdrop(images) {
+  if (analysisOverlayLabel) {
+    analysisOverlayLabel.textContent = "Analysis in progress";
+  }
+  if (!analysisPendingBackdrop || !analysisPendingBackdropWrap) return;
+  if (!images?.length) {
+    analysisPendingBackdrop.removeAttribute("src");
+    analysisPendingBackdrop.alt = "";
+    analysisPendingBackdropWrap.classList.add("is-empty");
+    return;
+  }
+  const latest = images[images.length - 1];
+  if (!latest?.imageUrl) {
+    analysisPendingBackdrop.removeAttribute("src");
+    analysisPendingBackdropWrap.classList.add("is-empty");
+    return;
+  }
+  analysisPendingBackdropWrap.classList.remove("is-empty");
+  analysisPendingBackdrop.alt = latest.fileName || formatCaptureDateForDisplay(latest.capturedAt) || "";
+  analysisPendingBackdrop.onerror = () => {
+    analysisPendingBackdrop.removeAttribute("src");
+    analysisPendingBackdropWrap.classList.add("is-empty");
+  };
+  analysisPendingBackdrop.src = latest.imageUrl;
 }
 
 function resetViewport() {
@@ -165,7 +219,7 @@ function drawSyntheticAirfield(rect, report) {
   ctx.stroke();
 
   ctx.fillStyle = "rgba(160, 176, 156, 0.14)";
-  if (report?.id === "sfo") {
+  if (report?.id === "sfo" || report?.id === "oak") {
     ctx.fillRect(0.1, 0.1, 0.38, 0.16);
     ctx.fillRect(0.45, 0.34, 0.28, 0.14);
   } else {
@@ -231,7 +285,7 @@ function drawAircraftMarker(aircraft, rect, analysis, dimPrevious = false) {
   const by = usePixels ? rect.y + (bbox.y / ih) * rect.height : rect.y + bbox.y * rect.height;
 
   const color =
-    typeColors[aircraft.type] || typeColors[aircraft.classification] || typeColors.unknown;
+    typeColors[canonicalPlaneCategory(aircraft.classification || aircraft.type)] || typeColors.commercial;
   const alpha = dimPrevious ? 0.35 : 0.9;
   const confidence = aircraft.classificationConfidence || aircraft.detectionConfidence || 0.5;
 
@@ -340,38 +394,19 @@ function render() {
   ctx.restore();
 }
 
-function renderWatchlist() {
-  const query = airfieldSearch.value.trim().toLowerCase();
-  const airfields = state.airfields.filter((airfield) => {
-    return airfield.code.toLowerCase().includes(query);
-  });
-
-  watchlist.innerHTML = "";
-  airfields.forEach((airfield) => {
-    const button = document.createElement("button");
-    button.className = "watchlist-item";
-    if (normalizeAirportCode(airfield.code) === state.selectedAirportCode) button.classList.add("active");
-    button.type = "button";
-    button.innerHTML = `
-      <div>
-        <strong>${airfield.code}</strong>
-        <span>${airfield.name} · ${airfield.imageCount || 0} images</span>
-      </div>
-      <span class="status-pill ${getSeverityClass(airfield.status)}">${airfield.status}</span>
-    `;
-    button.addEventListener("click", () => loadReport(airfield.code));
-    watchlist.appendChild(button);
-  });
+function syncAirfieldSelect() {
+  if (!airfieldSelect) return;
+  const code = state.selectedAirportCode;
+  if (!code) return;
+  const ok = [...airfieldSelect.options].some((o) => o.value === code);
+  if (ok) airfieldSelect.value = code;
 }
 
 /** Deltas vs prior capture for the selected frame (not global latest-vs-prior). */
 const ZERO_COMPOSITION_DELTA = Object.freeze({
   commercial: 0,
   cargo: 0,
-  business: 0,
   military: 0,
-  helicopter: 0,
-  unknown: 0,
 });
 
 function compositionDeltaBetween(current, previous) {
@@ -384,13 +419,14 @@ function compositionDeltaBetween(current, previous) {
 
 function renderComposition(report) {
   compositionGrid.innerHTML = "";
-  Object.entries(report.composition).forEach(([type, count]) => {
+  COMPOSITION_ORDER.forEach((type) => {
+    const count = report.composition[type] ?? 0;
     const card = document.createElement("div");
     card.className = "composition-card";
     const delta = report.deltas[type] ?? 0;
     const deltaText = delta > 0 ? `+${delta}` : String(delta);
     card.innerHTML = `
-      <span class="type-dot" style="background:${typeColors[type] || typeColors.unknown}"></span>
+      <span class="type-dot" style="background:${typeColors[type] || typeColors.commercial}"></span>
       <strong>${count}</strong>
       <span>${type}</span>
       <em>${deltaText}</em>
@@ -440,7 +476,10 @@ function renderTimeline(report) {
   timelineNote.textContent = `${report.timeline.length} captures`;
   const images = report.images || [];
   const maxTotal = Math.max(
-    ...report.timeline.map((point) => Object.keys(report.composition).reduce((sum, key) => sum + (point[key] || 0), 0)),
+    ...report.timeline.map((point) => {
+      const b = aggregateTimelinePoint(point);
+      return COMPOSITION_ORDER.reduce((sum, key) => sum + (b[key] || 0), 0);
+    }),
     1,
   );
 
@@ -473,12 +512,13 @@ function renderTimeline(report) {
     const stack = document.createElement("div");
     stack.className = "timeline-stack";
 
-    Object.keys(report.composition).forEach((type) => {
-      const value = point[type] || 0;
+    const buckets = aggregateTimelinePoint(point);
+    COMPOSITION_ORDER.forEach((type) => {
+      const value = buckets[type] || 0;
       if (!value) return;
       const segment = document.createElement("span");
       segment.style.height = `${Math.max(5, (value / maxTotal) * 100)}%`;
-      segment.style.background = typeColors[type] || typeColors.unknown;
+      segment.style.background = typeColors[type] || typeColors.commercial;
       stack.appendChild(segment);
     });
 
@@ -506,6 +546,7 @@ function renderCaptureControls(report) {
     previousCapture.disabled = true;
     nextCapture.disabled = true;
     refreshAnalysisBtn.disabled = true;
+    if (reclassifyAnalysisBtn) reclassifyAnalysisBtn.disabled = true;
     if (timelinePrev) timelinePrev.disabled = true;
     if (timelineNext) timelineNext.disabled = true;
     return;
@@ -524,6 +565,7 @@ function renderCaptureControls(report) {
   previousCapture.disabled = index <= 0;
   nextCapture.disabled = index >= captures.length - 1;
   refreshAnalysisBtn.disabled = false;
+  if (reclassifyAnalysisBtn) reclassifyAnalysisBtn.disabled = false;
   if (timelinePrev) timelinePrev.disabled = previousCapture.disabled;
   if (timelineNext) timelineNext.disabled = nextCapture.disabled;
 }
@@ -563,7 +605,7 @@ function renderReportDetails() {
   riskBand.className = `status-pill ${getSeverityClass(report.riskBand)}`;
   summaryText.textContent = report.summary;
 
-  renderWatchlist();
+  syncAirfieldSelect();
   renderComposition({ ...report, composition: selectedComposition, deltas: compositionDeltas });
   renderSignals(report);
   renderFindings(report);
@@ -575,14 +617,11 @@ function countComposition(planes) {
   const counts = {
     commercial: 0,
     cargo: 0,
-    business: 0,
     military: 0,
-    helicopter: 0,
-    unknown: 0,
   };
   planes.forEach((plane) => {
-    const type = plane.classification || plane.type || "unknown";
-    counts[type] = (counts[type] || 0) + 1;
+    const cat = canonicalPlaneCategory(plane.classification || plane.type);
+    counts[cat] = (counts[cat] || 0) + 1;
   });
   return counts;
 }
@@ -610,8 +649,20 @@ function normalizeAirportCode(airportCode) {
 async function loadReport(airportCode, refreshAnalysis = false) {
   const normalizedAirportCode = normalizeAirportCode(airportCode);
   state.selectedAirportCode = normalizedAirportCode;
-  renderWatchlist();
+  syncAirfieldSelect();
+  renderAnalysisPendingBackdrop(null);
   setAnalysisOverlay(true);
+  try {
+    const imagesPromise = fetch(
+      `/api/airfields/${encodeURIComponent(normalizedAirportCode)}/images`,
+    ).then((r) => (r.ok ? r.json() : null));
+    const listPayload = await imagesPromise;
+    if (listPayload?.images?.length) {
+      renderAnalysisPendingBackdrop(listPayload.images);
+    }
+  } catch {
+    /* overlay without backdrop */
+  }
   try {
     const query = refreshAnalysis ? "?refresh=1" : "";
     const response = await fetch(`/api/airfields/${encodeURIComponent(normalizedAirportCode)}${query}`);
@@ -625,6 +676,7 @@ async function loadReport(airportCode, refreshAnalysis = false) {
     renderReportDetails();
     render();
   } finally {
+    renderAnalysisPendingBackdrop(null);
     setAnalysisOverlay(false);
   }
 }
@@ -633,16 +685,16 @@ async function loadAirfields() {
   const response = await fetch("/api/airfields");
   const payload = await response.json();
   state.airfields = payload.airfields || [];
-  renderWatchlist();
-  await loadReport("suu");
+  if (airfieldSelect) airfieldSelect.value = "oak";
+  await loadReport("oak");
 }
 
-airfieldSearch.addEventListener("input", renderWatchlist);
-airfieldSearch.addEventListener("keydown", (event) => {
-  if (event.key !== "Enter") return;
-  const airportCode = normalizeAirportCode(airfieldSearch.value);
-  if (airportCode) loadReport(airportCode).catch(console.error);
-});
+if (airfieldSelect) {
+  airfieldSelect.addEventListener("change", () => {
+    const airportCode = normalizeAirportCode(airfieldSelect.value);
+    if (airportCode) loadReport(airportCode).catch(console.error);
+  });
+}
 if (boxesToggle) {
   boxesToggle.addEventListener("click", () => {
     state.boxesEnabled = !state.boxesEnabled;
@@ -720,10 +772,11 @@ window.addEventListener(
 );
 
 refreshAnalysisBtn.addEventListener("click", () => {
-  const code = state.report?.code || normalizeAirportCode(airfieldSearch.value);
+  const code = state.report?.code || normalizeAirportCode(airfieldSelect?.value);
   if (!code) return;
   const prevLabel = refreshAnalysisBtn.textContent;
   refreshAnalysisBtn.disabled = true;
+  if (reclassifyAnalysisBtn) reclassifyAnalysisBtn.disabled = true;
   previousCapture.disabled = true;
   nextCapture.disabled = true;
   captureSelect.disabled = true;
@@ -737,6 +790,39 @@ refreshAnalysisBtn.addEventListener("click", () => {
       renderReportDetails();
     });
 });
+
+if (reclassifyAnalysisBtn) {
+  reclassifyAnalysisBtn.addEventListener("click", () => {
+    const code = state.report?.code || normalizeAirportCode(airfieldSelect?.value);
+    if (!code) return;
+    const prevLabel = reclassifyAnalysisBtn.textContent;
+    refreshAnalysisBtn.disabled = true;
+    reclassifyAnalysisBtn.disabled = true;
+    previousCapture.disabled = true;
+    nextCapture.disabled = true;
+    captureSelect.disabled = true;
+    if (timelinePrev) timelinePrev.disabled = true;
+    if (timelineNext) timelineNext.disabled = true;
+    reclassifyAnalysisBtn.textContent = "Reclassifying…";
+    fetch(`/api/airfields/${encodeURIComponent(code)}/reclassify`, { method: "POST" })
+      .then(async (r) => {
+        const payload = await r.json().catch(() => ({}));
+        if (!r.ok) throw new Error(payload.error || r.statusText || "Reclassify failed");
+        return payload;
+      })
+      .then((payload) => {
+        if (payload.skipped?.length) {
+          console.warn("[reclassify] skipped images:", payload.skipped);
+        }
+        return loadReport(code, false);
+      })
+      .catch(console.error)
+      .finally(() => {
+        reclassifyAnalysisBtn.textContent = prevLabel;
+        renderReportDetails();
+      });
+  });
+}
 
 canvasWrap.addEventListener("pointerdown", (event) => {
   if (!state.report) return;

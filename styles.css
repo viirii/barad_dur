@@ -133,7 +133,8 @@ h3 {
   font-size: 13px;
 }
 
-.field-control input {
+.field-control input,
+.field-control select {
   width: 100%;
   height: 38px;
   padding: 0 10px;
@@ -144,7 +145,17 @@ h3 {
   outline: 0;
 }
 
-.field-control input:focus {
+.field-control select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%2399a399' d='M3 4.5 6 8l3-3.5'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  padding-right: 32px;
+}
+
+.field-control input:focus,
+.field-control select:focus {
   border-color: var(--accent);
 }
 
@@ -204,6 +215,11 @@ h3 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.section-heading {
+  flex-wrap: wrap;
+  align-items: flex-start;
 }
 
 .timeline-heading {
@@ -267,14 +283,26 @@ h3 {
   font-size: 13px;
 }
 
+.metric {
+  align-items: flex-start;
+}
+
+.metric > span:first-of-type {
+  flex-shrink: 0;
+  padding-top: 0.1em;
+}
+
 .metric strong {
-  max-width: 170px;
-  overflow: hidden;
+  flex: 1 1 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   color: var(--text);
   font-size: 13px;
+  font-weight: 600;
+  line-height: 1.45;
   text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  white-space: normal;
 }
 
 .view-controls-actions {
@@ -409,32 +437,33 @@ input[type="range"] {
 }
 
 .toolbar-lede {
-  flex: 1 1 160px;
+  flex: 1 1 0;
   min-width: 0;
   max-width: 100%;
 }
 
 .file-name {
   min-width: 0;
-  overflow: hidden;
   font-size: 14px;
   font-weight: 800;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .toolbar .viewer-subtitle {
   display: block;
   min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin-top: 4px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  word-break: break-word;
 }
 
 .toolbar-actions {
   display: flex;
   flex-wrap: wrap;
-  flex: 999 1 240px;
+  flex: 0 1 auto;
   justify-content: flex-end;
   align-items: center;
   gap: 8px;
@@ -485,18 +514,51 @@ input[type="range"] {
   position: absolute;
   inset: 0;
   z-index: 3;
-  display: grid;
-  place-content: center;
-  justify-items: center;
-  gap: 14px;
-  padding: 24px;
-  background: rgba(8, 10, 9, 0.75);
-  backdrop-filter: blur(5px);
+  overflow: hidden;
+  background: #0a0c0b;
   pointer-events: none;
 }
 
 .analysis-overlay.is-hidden {
   display: none;
+}
+
+.analysis-pending-backdrop-wrap {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.analysis-pending-backdrop-wrap.is-empty .analysis-pending-backdrop {
+  visibility: hidden;
+}
+
+.analysis-pending-backdrop {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  filter: blur(8px);
+  transform: scale(1.06);
+  transform-origin: center;
+  opacity: 0.85;
+}
+
+.analysis-overlay-center {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  pointer-events: none;
+  background: radial-gradient(ellipse 70% 60% at 50% 50%, rgba(8, 10, 9, 0.72) 0%, rgba(8, 10, 9, 0.45) 100%);
+  backdrop-filter: blur(2px);
 }
 
 .analysis-orbit {

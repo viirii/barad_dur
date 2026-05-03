@@ -5,6 +5,7 @@
   "description": "Self-hosted aircraft and drone imagery triage prototype.",
   "scripts": {
     "start": "node server.js",
+    "start:performance": "env HF_AIRCRAFT_QUICK=0 node server.js",
     "check": "node --check app.js && node --check server.js",
     "setup-detect": "python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements-detect.txt"
   },
