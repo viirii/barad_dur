@@ -50,7 +50,7 @@ const analysisCacheRoot = path.join(root, "data", "analysis-cache");
 const classificationCacheRoot = path.join(root, "data", "classification-cache");
 const summaryCacheRoot = path.join(root, "data", "summary-cache");
 /** Bump when the series-summary prompt or schema meaning changes (cache fingerprint salt). */
-const SERIES_SUMMARY_PROMPT_VERSION = "v4-canonical-airfield-in-prompt";
+const SERIES_SUMMARY_PROMPT_VERSION = "v5-unknown-buckets-and-summary-attention";
 const openaiApiKey = process.env.OPENAI_API_KEY || "";
 const openaiModel = process.env.OPENAI_MODEL || "gpt-5.5";
 
@@ -58,7 +58,7 @@ const openaiModel = process.env.OPENAI_MODEL || "gpt-5.5";
  * Mixed into `hashResolvedImagePath` so OpenAI `by-path` entries under `analysis-cache` miss completions from older prompts.
  * Bump when classify/vision instructions or JSON schema semantics change materially.
  */
-const OPENAI_PATH_CACHE_VERSION = "classify-v8-canonical-airfield-in-prompt";
+const OPENAI_PATH_CACHE_VERSION = "classify-v11-painted-vs-real-explicit-question";
 
 /**
  * Max concurrent `analyze_image` runs per airfield load (order preserved).
@@ -914,7 +914,7 @@ function classify_planes_stub_civilian(planeDetections) {
     ),
     realness: "uncertain",
     realnessConfidence: 0.5,
-    rationale: "Stub classification: HF detection only; military vs civilian not inferred yet.",
+    rationale: "Stub classification: HF detection only; military/civilian/unknown not inferred yet.",
     source: "stub_civilian",
   }));
 }
@@ -1094,10 +1094,11 @@ function normalizeModelDetection(plane, image, index, source = "openai_vision") 
   };
 }
 
-/** Canonical labels: military | civilian (civilian = anything not military). Legacy tri-class values map into these. */
+/** Canonical labels: military | civilian | unknown. Legacy values map into these. */
 function normalizeClassificationString(raw) {
   const v = String(raw ?? "").trim().toLowerCase();
   if (v === "military") return "military";
+  if (v === "unknown") return "unknown";
   return "civilian";
 }
 
@@ -1107,20 +1108,26 @@ function normalizeModelClassification(classification) {
   return normalizeClassificationString(raw);
 }
 
-/** JSON-schema description + prompt lines: bias toward flagging military (higher recall). */
+/** JSON-schema description + prompt lines: explicit painted vs real, then tri-label; military recall only for plausible real aircraft. */
 const AIRCRAFT_CLASSIFICATION_SENSITIVITY_DESCRIPTION =
-  "Binary military vs civilian in HIGH-SENSITIVITY screening mode: prefer recall for military over precision for civilian. " +
-  "(1) Ask whether ANY tactical cue appears (compact or swept/delta planform, short fuselage vs wingspan, tanker/ISR/tactical cargo posture, tactical dispersal or revetments, military rotor layout). " +
-  "(2) If the crop is ambiguous, small, distant, heat-hazed, or partly occluded, choose military when ANY cue suggests a tactical or military-type aircraft; do not default to civilian. " +
-  "(3) Use civilian only when the silhouette clearly reads as non-military (typical airliner tube, obvious civilian freighter, GA, bizjet without tactical cues). " +
-  "(4) Tie-break: if still uncertain after silhouette review, label military. Context like a civilian hub must not override a military-looking shape.";
+  "Tri-label **military | civilian | unknown**. **Ask directly for every box:** given the surrounding ramp/tarmac, lighting, and neighbors — does this look **painted or marked on the ground** (flat graphic, tarmac marking, decoy-like silhouette, colors that read as paint on asphalt rather than a 3D fuselage), or does it **actually look like a real aircraft** sitting on the surface (believable volume, materials, and shadow consistent with the scene)? " +
+  "If it reads as **painted / flat / not a real plane in context**, set **classification unknown** and **realness** painted_or_decoy or uncertain (or digitally_modified if composite/paste). **Only if** it **actually looks like a real aircraft**, proceed to mil/civ. " +
+  "Other **off or weird** cues (wrong albedo vs neighbors, missing/wrong shadows, halos, geometry that does not read as a parked aircraft) → same: **unknown** + non-real **realness**. **Do not** assign military or civilian when the answer to “real plane vs painted?” is not clearly **real**. " +
+  "**Only if** the object plausibly looks like a **real** aircraft: assign **military** when tactical cues support it (swept/delta/compact tactical planform, military transport/tanker/helo, etc.) — including small/distant/hazy crops if those cues exist; **civilian** when the silhouette clearly reads non-military. " +
+  "**Unknown** also when mil/civ is not supportable (extreme blur, not clearly an aircraft) even if somewhat plausible. " +
+  "When it is clearly a **real** aircraft but military vs civilian stays ambiguous after silhouette review, tie-break **military**; a civilian hub must not override a tactical-looking **real** shape. " +
+  "Always align **realness** with how natural the crop looks; cite unnatural cues in **rationale**.";
 
 function buildClassificationSensitivityPromptLines() {
   return [
-    "SENSITIVITY (screening): Military-leaning monitor — favor RECALL for military (accept extra military flags rather than miss tactical aircraft).",
-    "  • Small/distant/hazy/glare/occluded crops: choose military if ANY tactical silhouette cue exists; do not pick civilian by default.",
-    "  • “Maybe fighter / maybe tactical” → military. Clear tube-with-wings airliner / obvious civilian freighter → civilian.",
-    "  • Tie-break after silhouette review: military. Airport name or apron style must not talk you out of a tactical-looking shape.",
+    "**Painted vs real (answer out loud in rationale):** Does this look like **paint on the ramp** / flat marking / decoy silhouette, or like a **real aircraft** in this image context (lighting, shadow, texture vs neighbors)? If not clearly a **real plane** → **classification unknown**; set **realness** accordingly.",
+    "SENSITIVITY (screening): **That question before mil/civ.** Wrong/weird colors, flat graphic look, bad shadows, paste/halos → **unknown** + non-real **realness**.",
+    "  • Detector boxes can be false positives — do not trust the label “plane” over your eyes.",
+    "  • Only when the crop **plausibly** looks like a **real** aircraft: favor **military** recall if ANY tactical silhouette cue exists (small/distant/hazy OK if cues exist).",
+    "  • Clear tube-with-wings airliner / obvious civilian freighter (and looks natural) → civilian.",
+    "  • **Unknown** for unnatural/decoy-like/artifact crops OR when mil/civ is not honestly callable. Do not default to civilian to dodge unknown.",
+    "  • Tie-break **military** only when the object is a plausible **real** aircraft but mil vs civ remains ambiguous. Airport name must not talk you out of a tactical-looking **real** shape.",
+    "  • **Realness** must reflect naturalness (real vs painted_or_decoy / digitally_modified / uncertain); cite specifics in rationale.",
   ];
 }
 
@@ -1141,23 +1148,25 @@ function getAircraftClassificationOnlySchema() {
       id: { type: "string" },
       classification: {
         type: "string",
-        enum: ["civilian", "military"],
+        enum: ["civilian", "military", "unknown"],
         description: AIRCRAFT_CLASSIFICATION_SENSITIVITY_DESCRIPTION,
       },
       classificationConfidence: {
         type: "number",
         description:
-          "Your confidence in the military vs civilian label; use LOWER numbers when the crop is ambiguous but you still applied the sensitivity tie-break (military when unsure).",
+          "Confidence in military vs civilian vs unknown; use lower values when the crop is poor, looks unnatural, or you chose unknown because mil/civ or real-aircraft plausibility is weak.",
       },
       realness: {
         type: "string",
         enum: ["real", "painted_or_decoy", "digitally_modified", "uncertain"],
+        description:
+          "Outcome of: does it look **painted/marked on the ramp** vs **actually like a real aircraft** in this scene? real = convincingly a real plane in context; painted_or_decoy = flat/decoy/marking-like; digitally_modified = composite/paste; uncertain = cannot tell.",
       },
       realnessConfidence: { type: "number" },
       rationale: {
         type: "string",
         description:
-          "Briefly cite silhouette cues. If you chose military partly due to ambiguity/sensitivity policy, say so.",
+          "State explicitly whether it looks **painted/decoy-like vs a real plane given ramp and lighting context**; then silhouette, mil/civ/unknown, and realness.",
       },
     },
   };
@@ -1202,20 +1211,30 @@ function getAircraftClassificationOnlySchema() {
       },
       classification: {
         type: "string",
-        enum: ["civilian", "military"],
+        enum: ["civilian", "military", "unknown"],
         description: AIRCRAFT_CLASSIFICATION_SENSITIVITY_DESCRIPTION,
       },
-      classificationConfidence: { type: "number" },
+      classificationConfidence: {
+        type: "number",
+        description:
+          "Confidence in military vs civilian vs unknown; lower when the crop looks unnatural or unknown was chosen.",
+      },
       realness: {
         type: "string",
         enum: ["real", "painted_or_decoy", "digitally_modified", "uncertain"],
+        description:
+          "Painted/marked/decoy vs actually a real aircraft in context; only use real when clearly the latter.",
       },
       realnessConfidence: { type: "number" },
-      rationale: { type: "string" },
+      rationale: {
+        type: "string",
+        description:
+          "Say painted vs real in context; silhouette; realness. Only add if clearly a real aircraft missed by the detector.",
+      },
       additionCertainty: {
         type: "number",
         description:
-          "How certain you are that this is a genuine aircraft missed by the prior detector (not noise). Only output rows with additionCertainty >= 0.85.",
+          "How certain you are that this is a genuine natural-looking aircraft missed by the prior detector (not noise). Only output rows with additionCertainty >= 0.85.",
       },
     },
   };
@@ -1299,23 +1318,25 @@ function getAircraftCombinedSchema() {
       detectionConfidence: { type: "number" },
       classification: {
         type: "string",
-        enum: ["civilian", "military"],
+        enum: ["civilian", "military", "unknown"],
         description: AIRCRAFT_CLASSIFICATION_SENSITIVITY_DESCRIPTION,
       },
       classificationConfidence: {
         type: "number",
         description:
-          "Your confidence in the military vs civilian label; use LOWER numbers when the crop is ambiguous but you still applied the sensitivity tie-break (military when unsure).",
+          "Confidence in military vs civilian vs unknown; lower when imagery is poor, crop looks unnatural, or unknown is chosen because mil/civ or plausibility is weak.",
       },
       realness: {
         type: "string",
         enum: ["real", "painted_or_decoy", "digitally_modified", "uncertain"],
+        description:
+          "How natural/plausible the crop looks as a physical aircraft; wrong colors, bad shadows, or paste tells → not real.",
       },
       realnessConfidence: { type: "number" },
       rationale: {
         type: "string",
         description:
-          "Briefly cite silhouette cues. If you chose military partly due to ambiguity/sensitivity policy, say so.",
+          "Cite naturalness (colors, shadows), silhouette, realness, and unknown vs military tie-break if applicable.",
       },
     },
   };
@@ -1367,13 +1388,14 @@ function buildOpenAiAircraftPrompt(imageDims) {
     "    width = box width as a fraction of full image width (0–1).",
     "    height = box height as a fraction of full image height (0–1).",
     "    The point (x, y) is the top-left corner of the rectangle in this normalized space.",
-    "(3) Classify each aircraft as exactly one of: civilian or military — silhouette first, airport context last.",
-    "    First ask: does this look military? Military includes fighters, attack jets, trainers, tankers, AWACS, military transports, tactical rotorcraft (compact/tactical proportions, delta or strongly swept wings, short fuselage vs wingspan, wing-body blends, tactical parking).",
-    "    If it does NOT read as military, label civilian — that includes passenger airliners, freighters, regional jets, GA, bizjets, and civilian helicopters (everything non-military).",
+    "(3) Classify each aircraft as exactly one of: **civilian | military | unknown**. **First ask outright:** does this look **painted or marked on the surface** (decoy-like, flat graphic, tarmac marking) or does it **actually look like a real aircraft** in this scene (ramp context, lighting, believable shadow and volume)? If **painted / not a real plane in context** → **unknown** + non-real **realness**; skip mil/civ.",
+    "    **Military** (only if plausible real aircraft) includes fighters, attack jets, trainers, tankers, AWACS, military transports, tactical rotorcraft (compact/tactical proportions, delta or strongly swept wings, short fuselage vs wingspan, wing-body blends, tactical parking).",
+    "    **Civilian** when the shape clearly reads non-military **and** the object looks like a natural real aircraft.",
+    "    **Unknown** when unnatural/decoy-like, not clearly an aircraft, extreme blur, or mil/civ not honestly callable.",
     "    CRITICAL: Do NOT label military-shaped jets as civilian because the image shows a major civilian airport. Fighters can appear on any ramp in satellite views.",
-    "    If unsure between military and civilian after checking silhouette, prefer military when wings dominate and the fuselage is short relative to wingspan.",
+    "    If unsure between military and civilian after checking silhouette but it is clearly a **natural** aircraft, prefer military when wings dominate and the fuselage is short relative to wingspan.",
     ...buildClassificationSensitivityPromptLines(),
-    "(4) Judge whether each detection looks real, painted_or_decoy, digitally_modified, or uncertain.",
+    "(4) Judge **realness** to match that same question: **real** only when it **actually** looks like a physical aircraft in context; otherwise **painted_or_decoy**, **digitally_modified**, or **uncertain** — say which in rationale.",
     "",
     "Exclude: buildings, trucks, cars, runway markings, text labels, shadows without clear aircraft shape, and ambiguous blobs.",
     "Be conservative: omit doubtful objects rather than inventing aircraft.",
@@ -1388,17 +1410,18 @@ function buildOpenAiClassificationOnlyPrompt(detectionPayload, imageDims, airpor
       : "The attached image is full-resolution. Bboxes in the JSON are normalized [0,1] fractions; do not change them.";
 
   return [
-    "You classify aircraft only. Pre-listed boxes come from an automated detector; your PRIMARY job is military vs civilian and realness per listed id.",
-    "MODE: High-sensitivity military screening — favor recall for military; when in doubt after silhouette review, label military.",
+    "You classify aircraft only. Pre-listed boxes come from an automated detector — **do not assume every box is a real plane.** Your job is to **decide painted/marked/decoy vs actually a real aircraft in context**, then **military vs civilian vs unknown**, and **realness** per listed id.",
+    "MODE: For **each** listed id, **explicitly answer:** “Does this look **painted on** (ground marking, flat graphic, fake aircraft paint, colors that sit on the tarmac like a decal) or does it **actually look like a real aircraft** here given ramp, sun direction, and texture vs neighbors?” If **painted / not a real plane in context** → **classification unknown**, **realness** painted_or_decoy or uncertain (digitally_modified if pasted/composite). **Only if** it **actually looks like a real aircraft**, assign military or civilian. When it clearly does and mil vs civ is ambiguous, favor military (screening); when it clearly does and shape is non-military → civilian.",
     "Rules (listed detections):",
     "  • Output exactly one JSON row per input id; copy each id string exactly. Do not change bbox numbers for listed ids.",
-    "  • Classification enum per plane: civilian | military (exactly one).",
-    "  • DECISION ORDER: (1) If the crop clearly reads as non-military (typical narrow-body airliner tube, obvious civilian GA/bizjet/helo with no tactical cues) → civilian. (2) If it clearly reads as military (tactical jet, tanker, military transport, military helo) → military. (3) If ambiguous after silhouette review, apply the airfield line below: at military installations lean military; at commercial airports still never force-civilian on tactical shapes.",
-    "  • SILHOUETTE FIRST: military includes compact/tactical jets, strongly swept or delta wings, short fuselage vs wingspan, tankers, strategic/tactical transports, ISR stacks, military helos. civilian = clearly non-military aircraft.",
+    "  • Classification enum per plane: civilian | military | unknown (exactly one).",
+    "  • DECISION ORDER: (0) **Painted vs real in context** — state in rationale whether it looks **painted/marked/decoy-like** vs **actually like a real plane** on the ramp. If painted/not real in scene → **classification unknown** + non-real **realness**; do not force mil/civ. (1) If **actually real-looking** and clearly non-military (tube airliner, obvious civilian GA/bizjet/helo, no tactical cues) → civilian. (2) If **actually real-looking** and clearly military (tactical jet, tanker, military transport, military helo) → military. (3) If **actually real-looking** but mil/civ not callable → **unknown**. (4) If **actually real-looking**, ambiguous on mil/civ after silhouette, apply Airfield context: lean military at military installations; at commercial airports never force-civilian on tactical shapes.",
+    "  • SILHOUETTE (after plausibility): military = compact/tactical jets, swept/delta wings, short fuselage vs wingspan, tankers, strategic/tactical transports, ISR stacks, military helos. civilian = clearly non-military **natural** aircraft. unknown = unnatural crop, not a credible aircraft, or no honest mil/civ.",
     "  • Military airfields (see Airfield context): transports and tankers often look like 'fat' or high-wing bodies in satellite view — do NOT default those to civilian airliners. When shape could reasonably be C-17/C-5/KC-135-class or similar, prefer military.",
     "  • Demo imagery folders: the Airfield context line already uses the **operational** base identity (e.g. SFO or SUU); trust that line for priors, not the on-disk folder code.",
     "  • Never pick civilian for objects that look like fighters or tactical jets just because the scene looks like a busy civilian airport.",
-    "  • If unsure between military and civilian, prefer military when wings dominate and the fuselage is short relative to wingspan.",
+    "  • If unsure between military and civilian but it is clearly a **natural real** aircraft, prefer military when wings dominate and the fuselage is short relative to wingspan.",
+    "  • **Realness**: must match your **painted vs real** answer; cite what you saw (flat paint on tarmac vs 3D aircraft, shadow, texture) in rationale.",
     "  • Use apron/terminal context only as a weak tie-breaker after shape, except the explicit military/commercial **type** in Airfield context may break ties on ambiguous transports.",
     "",
     "Additional aircraft (optional — strict bar):",
@@ -1968,7 +1991,7 @@ async function analyze_image(image, airportCode, options = {}) {
       schemaVersion: 1,
       cachedAt: new Date().toISOString(),
       openaiModel,
-      classificationSchema: "aircraft_classify_only_v7",
+      classificationSchema: "aircraft_classify_only_v9-naturalness",
       analysisProviderKey: getAnalysisProviderKey(),
       airportCode: normalizedCode,
       imageId: image.id,
@@ -2086,7 +2109,7 @@ async function reclassifyFromCachedAnalysis(airportCode, image) {
       cachedAt: new Date().toISOString(),
       trigger: "reclassify",
       openaiModel,
-      classificationSchema: "aircraft_classify_only_v7",
+      classificationSchema: "aircraft_classify_only_v9-naturalness",
       analysisProviderKey: getAnalysisProviderKey(),
       airportCode: normalizedCode,
       imageId: image.id,
@@ -2199,6 +2222,7 @@ function countPlaneTypes(planes) {
   const counts = {
     civilian: 0,
     military: 0,
+    unknown: 0,
   };
 
   planes.forEach((plane) => {
@@ -2225,9 +2249,10 @@ function subtractCounts(current, previous = {}) {
 const ZERO_PLANE_DELTA = Object.freeze({
   civilian: 0,
   military: 0,
+  unknown: 0,
 });
 
-const PLANE_CATEGORIES = ["civilian", "military"];
+const PLANE_CATEGORIES = ["civilian", "military", "unknown"];
 
 function sumFleetComposition(comp) {
   return PLANE_CATEGORIES.reduce((total, key) => total + (comp[key] || 0), 0);
@@ -2293,7 +2318,7 @@ function buildChangeSignals({
   }
 
   let maxAbs = 0;
-  let maxKey = "unknown";
+  let maxKey = null;
   for (const key of PLANE_CATEGORIES) {
     const dv = deltas[key] || 0;
     if (Math.abs(dv) > maxAbs) {
@@ -2302,7 +2327,7 @@ function buildChangeSignals({
     }
   }
 
-  if (previousAnalysis && maxAbs > 0) {
+  if (previousAnalysis && maxAbs > 0 && maxKey != null) {
     const dv = deltas[maxKey] || 0;
     signals.push({
       label: "Largest type swing",
@@ -2310,7 +2335,7 @@ function buildChangeSignals({
       severity: maxAbs >= 5 ? "high" : maxAbs >= 2 ? "medium" : "low",
     });
   } else {
-    let bestKey = "unknown";
+    let bestKey = null;
     let bestN = -1;
     for (const key of PLANE_CATEGORIES) {
       const n = latestComposition[key] || 0;
@@ -2319,10 +2344,11 @@ function buildChangeSignals({
         bestKey = key;
       }
     }
-    const pct = latestTotal ? Math.round(((latestComposition[bestKey] || 0) / latestTotal) * 100) : 0;
+    const pct =
+      latestTotal && bestKey != null ? Math.round(((latestComposition[bestKey] || 0) / latestTotal) * 100) : 0;
     signals.push({
       label: "Dominant type (latest)",
-      value: `${bestKey} · ${pct}% of fleet`,
+      value: bestKey != null ? `${bestKey} · ${pct}% of fleet` : "—",
       severity: "low",
     });
   }
@@ -2355,14 +2381,21 @@ function buildChangeSignals({
   const ambReal = planes.filter((p) =>
     ["uncertain", "painted_or_decoy"].includes(p.realness),
   ).length;
+  const unkType = latestComposition.unknown || 0;
+  const unkShare = latestTotal ? unkType / latestTotal : 0;
   const ambParts = [];
   if (lowDet) ambParts.push(`${lowDet} low detection confidence`);
   if (ambReal) ambParts.push(`${ambReal} ambiguous realness (vision)`);
+  if (unkType)
+    ambParts.push(
+      `${unkType} unknown mil/civ type (${Math.round(unkShare * 100)}% of latest)`,
+    );
 
   signals.push({
     label: "Ambiguity",
     value: ambParts.length ? ambParts.join("; ") : "None flagged",
-    severity: lowDet >= 3 || ambReal ? "medium" : "low",
+    severity:
+      lowDet >= 3 || ambReal || unkType >= 4 || unkShare >= 0.35 ? "medium" : "low",
   });
 
   return signals;
@@ -2382,17 +2415,17 @@ function getAirfieldSeriesSummarySchema() {
       narrative: {
         type: "string",
         description:
-          "2–5 sentences. Lead with the LATEST capture (most recent row): how its counts and mix compare to the rest of the series and to what this airfield type would normally show. Then summarize multi-date context (trends, sustained shifts, or stability). Focus ONLY on what is unexpected or actionable. Do NOT name models, software, or detection settings. Avoid framing as only 'vs the immediately previous row'—use the whole history for context. It is NOT concerning that a military base shows military aircraft, or that a busy civilian airport shows mostly civilian traffic.",
+          "2–5 sentences. Lead with the LATEST capture (most recent row): how its **civilian / military / unknown** counts and mix compare to the rest of the series and to what this airfield type would normally show. If the latest capture or recent history has a **large count or high fraction of unknown** (type could not be called military or civilian), explicitly call that out as **worth human attention** (imagery quality, possible decoys, or detector noise). Then summarize multi-date context (trends, sustained shifts, or stability). Focus ONLY on what is unexpected or actionable. Do NOT name models, software, or detection settings. Avoid framing as only 'vs the immediately previous row'—use the whole history for context. It is NOT concerning that a military base shows military aircraft, or that a busy civilian airport shows mostly civilian traffic.",
       },
       anomalous: {
         type: "boolean",
         description:
-          "True only if a human analyst should review this series or the latest snapshot—e.g. latest snapshot departs meaningfully from historical pattern on this series for this airfield type, or counts imply something implausible or worth verifying. False when behavior looks ordinary for this site type including normal traffic volume.",
+          "True when a human analyst should review this series or the latest snapshot: e.g. latest departs meaningfully from historical pattern for this airfield type, counts are implausible, **or unknown-classification counts are high** (many detections where military vs civilian could not be judged — deserves attention). False when behavior looks ordinary for this site type including normal traffic volume and low unknown share.",
       },
       unexpectedObservations: {
         type: "array",
         description:
-          "Only items a user should act on or understand as anomalous. Empty if the series is unremarkable for this airfield type. Do not list 'normal' military at military fields or normal civilian traffic at commercial hubs.",
+          "Only items a user should act on or understand as anomalous. Empty if the series is unremarkable for this airfield type. Do not list 'normal' military at military fields or normal civilian traffic at commercial hubs. Include items here when **unknown** counts spike (type unclear) in a way that merits review.",
         items: {
           type: "object",
           additionalProperties: false,
@@ -2414,19 +2447,20 @@ function buildAirfieldSeriesSummaryPrompt(report, images, imageAnalyses) {
   const code = String(identity?.code || report.code || "").trim();
   const rows = images.map((img, i) => {
     const a = imageAnalyses[i];
-    const comp = a ? countPlaneTypes(a.planes || []) : { civilian: 0, military: 0 };
+    const comp = a ? countPlaneTypes(a.planes || []) : { civilian: 0, military: 0, unknown: 0 };
     return {
       fileName: img.fileName,
       capturedAt: img.capturedAt,
       civilian: comp.civilian,
       military: comp.military,
+      unknown: comp.unknown,
       total: sumFleetComposition(comp),
     };
   });
 
   return [
     "You write briefings for people monitoring airfields from satellite-style imagery.",
-    "You are given civilian vs military counts per dated capture, ordered in time. The LAST row is the latest snapshot—compare it against ALL earlier rows as historical context. Your audience cares about SURPRISES relative to what this airfield is for—not about listing normal operations.",
+    "You are given **civilian, military, and unknown** counts per dated capture (`unknown` = type could not be judged military vs civilian), ordered in time. The LAST row is the latest snapshot—compare it against ALL earlier rows as historical context. Your audience cares about SURPRISES relative to what this airfield is for—not about listing normal operations.",
     "",
     "Expectations (do NOT flag these as problems):",
     "  • Military airfields / AFB: military-type aircraft and military-heavy mixes are normal.",
@@ -2436,6 +2470,7 @@ function buildAirfieldSeriesSummaryPrompt(report, images, imageAnalyses) {
     "What IS worth calling out (if supported by the counts):",
     "  • Total aircraft activity that seems wildly out of scale for the site, or a sustained trend that departs from a plausible baseline for that airfield type.",
     "  • Civilian vs military mix that is surprising given the stated airfield profile (e.g. large military-type presence at a purely civilian hub, or patterns that contradict the base mission—use judgment).",
+    "  • **Many unknown classifications** on the latest capture or sustained across recent dates — treat as **attention-worthy** (unclear silhouettes, possible decoys/markings, poor imagery, or detector issues). Suggest setting **anomalous** true when unknown count or share is clearly elevated vs the rest of the series or vs a reasonable baseline.",
     "  • Erratic or implausible swings across the series that suggest bad data rather than real movement—but describe as 'worth verifying' without naming tools.",
     "",
     "Do NOT: mention model names, APIs, software, detector settings, or pipeline steps. Do NOT structure the narrative around consecutive capture pairs or 'vs the previous image'. You may describe multi-date trends (e.g. build-up over several captures).",
@@ -2445,7 +2480,7 @@ function buildAirfieldSeriesSummaryPrompt(report, images, imageAnalyses) {
     `Name: ${identity?.name || report.name || ""}`,
     `Number of dated captures in this series: ${images.length}`,
     "",
-    "Counts per capture (civilian / military / total detections). The array is chronological; the last object is the latest snapshot to compare against all earlier ones:",
+    "Counts per capture (civilian / military / unknown / total detections). The array is chronological; the last object is the latest snapshot to compare against all earlier ones:",
     JSON.stringify(rows, null, 2),
     "",
     "Set anomalous to true only when a human should take a serious look (latest vs history supports that call). If everything looks ordinary for this airfield type, set anomalous to false.",
@@ -2457,11 +2492,12 @@ function buildAirfieldSeriesSummaryPrompt(report, images, imageAnalyses) {
 function computeSeriesSummaryFingerprint(report, images, imageAnalyses) {
   const rows = images.map((img, i) => {
     const a = imageAnalyses[i];
-    const comp = a ? countPlaneTypes(a.planes || []) : { civilian: 0, military: 0 };
+    const comp = a ? countPlaneTypes(a.planes || []) : { civilian: 0, military: 0, unknown: 0 };
     return {
       fileName: img.fileName,
       civilian: comp.civilian,
       military: comp.military,
+      unknown: comp.unknown,
       total: sumFleetComposition(comp),
     };
   });
@@ -2590,7 +2626,7 @@ function deriveLiveInspectorFields({
     `${images.length} dated local capture${images.length === 1 ? "" : "s"}.`,
     `Latest frame: ${total} detection${total === 1 ? "" : "s"} (civilian ${latestComposition.civilian || 0}, military ${
       latestComposition.military || 0
-    }).`,
+    }, unknown ${latestComposition.unknown || 0}).`,
   ];
 
   let summary = summaryParts.join(" ");

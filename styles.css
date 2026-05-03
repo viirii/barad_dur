@@ -793,61 +793,85 @@ canvas {
   min-height: 3px;
 }
 
+/* Latest composition: 3 stacked cards; type | count+share | delta. */
 .composition-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-direction: column;
   gap: 10px;
 }
 
 .composition-card {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 10px 12px;
   align-items: center;
+  gap: 12px;
   padding: 10px 12px;
   border: 1px solid var(--line);
   border-radius: 8px;
   background: #171b18;
 }
 
-.composition-card-body {
+.composition-card-type {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.composition-type-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  text-transform: capitalize;
+  line-height: 1.2;
+}
+
+.composition-card-count-col {
   display: flex;
   flex-direction: column;
+  align-items: center;
+  justify-content: center;
   gap: 2px;
+  text-align: center;
   min-width: 0;
 }
 
-.composition-card-body strong {
+.composition-stat-count {
   font-size: 22px;
   font-variant-numeric: tabular-nums;
   line-height: 1.15;
   color: var(--text);
 }
 
-.composition-card-body span {
+.composition-stat-sublabel {
+  font-size: 11px;
   color: var(--muted);
-  font-size: 12px;
   font-style: normal;
-  text-transform: capitalize;
+  line-height: 1.2;
 }
 
-.composition-delta {
+.composition-card-delta {
   display: flex;
   flex-direction: column;
   align-items: flex-end;
+  text-align: right;
   gap: 2px;
-  justify-self: end;
-  color: var(--muted);
-  font-size: 12px;
-  font-style: normal;
+  flex-shrink: 0;
+}
+
+.composition-delta-abs {
+  font-size: 15px;
+  font-weight: 650;
   font-variant-numeric: tabular-nums;
-  white-space: nowrap;
+  color: var(--text);
   line-height: 1.15;
 }
 
-.composition-delta span:first-child {
-  color: var(--text);
-  font-weight: 650;
+.composition-delta-pct {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--muted);
+  line-height: 1.15;
 }
 
 .type-dot {

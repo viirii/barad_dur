@@ -14,7 +14,6 @@ const viewerSubtitle = document.getElementById("viewerSubtitle");
 const selectedCode = document.getElementById("selectedCode");
 const airfieldType = document.getElementById("airfieldType");
 const lastCapture = document.getElementById("lastCapture");
-const baselineSummary = document.getElementById("baselineSummary");
 const summaryAnomalyBadge = document.getElementById("summaryAnomalyBadge");
 const summarySeriesMeta = document.getElementById("summarySeriesMeta");
 const summaryHeadline = document.getElementById("summaryHeadline");
@@ -33,28 +32,31 @@ const zoomReadout = document.getElementById("zoomReadout");
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;
 
-/** Align with server `normalizeClassificationString`: military | civilian (civilian = non-military). Legacy tri-class maps here. */
+/** Align with server `normalizeClassificationString`: military | civilian | unknown. */
 function canonicalPlaneCategory(raw) {
   const v = String(raw ?? "").trim().toLowerCase();
   if (v === "military") return "military";
+  if (v === "unknown") return "unknown";
   return "civilian";
 }
 
-const COMPOSITION_ORDER = ["civilian", "military"];
+const COMPOSITION_ORDER = ["civilian", "military", "unknown"];
 
 const COMPOSITION_LABELS = {
   civilian: "Civilian",
   military: "Military",
+  unknown: "Unknown",
 };
 
 const typeColors = {
   civilian: "#6fb6ff",
   military: "#ff8b72",
+  unknown: "#c4b8ff",
 };
 
-/** Roll mixed/legacy timeline rows into civilian vs military buckets. */
+/** Roll mixed/legacy timeline rows into civilian / military / unknown buckets. */
 function aggregateTimelinePoint(point) {
-  const acc = { civilian: 0, military: 0 };
+  const acc = { civilian: 0, military: 0, unknown: 0 };
   for (const [key, val] of Object.entries(point)) {
     if (key === "date") continue;
     const n = Number(val) || 0;
@@ -439,6 +441,7 @@ function syncAirfieldSelect() {
 const ZERO_COMPOSITION_DELTA = Object.freeze({
   civilian: 0,
   military: 0,
+  unknown: 0,
 });
 
 function compositionDeltaBetween(current, previous) {
@@ -451,10 +454,12 @@ function compositionDeltaBetween(current, previous) {
 
 function renderComposition(report) {
   compositionGrid.innerHTML = "";
+  const total = COMPOSITION_ORDER.reduce((sum, type) => sum + (report.composition[type] ?? 0), 0);
   COMPOSITION_ORDER.forEach((type) => {
     const count = report.composition[type] ?? 0;
     const card = document.createElement("div");
     card.className = "composition-card";
+    card.dataset.planeCategory = type;
     const delta = report.deltas[type] ?? 0;
     const prevCount = count - delta;
     const deltaText = delta > 0 ? `+${delta}` : String(delta);
@@ -467,16 +472,24 @@ function renderComposition(report) {
     } else if (delta < 0) {
       pctText = "-100%";
     }
+    const sharePct = total > 0 ? Math.round((count / total) * 100) : 0;
+    const shareLine = total > 0 ? `${sharePct}% of ${total}` : "—";
+    const dotColor = typeColors[type] || typeColors.civilian;
+    const label = COMPOSITION_LABELS[type] || type;
     card.innerHTML = `
-      <span class="type-dot" style="background:${typeColors[type] || typeColors.civilian}"></span>
-      <div class="composition-card-body">
-        <strong>${count}</strong>
-        <span>${COMPOSITION_LABELS[type] || type}</span>
+      <div class="composition-card-type">
+        <span class="type-dot" style="background:${dotColor}" aria-hidden="true"></span>
+        <span class="composition-type-label">${label}</span>
       </div>
-      <em class="composition-delta">
-        <span>${deltaText}</span>
-        <span>${pctText}</span>
-      </em>
+      <div class="composition-card-count-col">
+        <strong class="composition-stat-count">${count}</strong>
+        <span class="composition-stat-sublabel">${shareLine}</span>
+      </div>
+      <div class="composition-card-delta">
+        <span class="composition-delta-abs">${deltaText}</span>
+        <span class="composition-delta-pct">${pctText}</span>
+        <span class="composition-stat-sublabel">vs prior</span>
+      </div>
     `;
     compositionGrid.appendChild(card);
   });
@@ -609,7 +622,6 @@ function renderReportDetails() {
   lastCapture.textContent = selectedCapture?.capturedAt
     ? formatCaptureDateForDisplay(selectedCapture.capturedAt)
     : report.lastCapture;
-  baselineSummary.textContent = report.baseline;
   viewerTitle.textContent = `${report.code} - ${report.name}`;
   viewerSubtitle.textContent = selectedCapture
     ? `Local capture ${state.captureIndex + 1} of ${(report.images || []).length} with aircraft boxes`
@@ -679,6 +691,7 @@ function countComposition(planes) {
   const counts = {
     civilian: 0,
     military: 0,
+    unknown: 0,
   };
   planes.forEach((plane) => {
     const cat = canonicalPlaneCategory(plane.classification || plane.type);
