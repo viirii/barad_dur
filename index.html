@@ -135,31 +135,33 @@
       </section>
 
       <aside class="inspector">
-        <section class="panel">
+        <section class="panel activity-summary-panel">
           <div class="section-heading">
             <h2>Activity Summary</h2>
-            <span id="riskBand" class="status-pill neutral">Waiting</span>
+            <span id="summaryAnomalyBadge" class="anomaly-badge is-hidden" role="status">Anomaly</span>
           </div>
+          <p id="summarySeriesMeta" class="summary-series-meta" aria-live="polite"></p>
+          <p id="summaryHeadline" class="summary-headline is-hidden"></p>
           <p id="summaryText" class="summary-text">Select an airport to generate a monitoring report.</p>
+          <p id="summaryCoherence" class="summary-coherence is-hidden"></p>
+          <div class="summary-actions">
+            <button
+              id="refreshSummary"
+              class="text-button refresh-summary-button"
+              type="button"
+              title="Re-run OpenAI series summary using current per-image classifications (no full detector refresh)"
+              disabled
+            >
+              Refresh summary
+            </button>
+          </div>
         </section>
 
         <section class="panel">
-          <h2>Latest Composition</h2>
+          <div class="section-heading section-heading--solo">
+            <h2>Latest Composition</h2>
+          </div>
           <div id="compositionGrid" class="composition-grid"></div>
-        </section>
-
-        <section class="panel">
-          <h2>Change Signals</h2>
-          <div id="signalList" class="category-list">
-            <div class="empty-copy">No report loaded.</div>
-          </div>
-        </section>
-
-        <section class="panel findings-panel">
-          <h2>Key Findings</h2>
-          <div id="findingsList" class="findings-list">
-            <div class="empty-copy">Flagged regions will appear here.</div>
-          </div>
         </section>
       </aside>
     </main>

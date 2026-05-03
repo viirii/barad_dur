@@ -15,11 +15,13 @@ const selectedCode = document.getElementById("selectedCode");
 const airfieldType = document.getElementById("airfieldType");
 const lastCapture = document.getElementById("lastCapture");
 const baselineSummary = document.getElementById("baselineSummary");
-const riskBand = document.getElementById("riskBand");
+const summaryAnomalyBadge = document.getElementById("summaryAnomalyBadge");
+const summarySeriesMeta = document.getElementById("summarySeriesMeta");
+const summaryHeadline = document.getElementById("summaryHeadline");
 const summaryText = document.getElementById("summaryText");
+const summaryCoherence = document.getElementById("summaryCoherence");
+const refreshSummaryBtn = document.getElementById("refreshSummary");
 const compositionGrid = document.getElementById("compositionGrid");
-const signalList = document.getElementById("signalList");
-const findingsList = document.getElementById("findingsList");
 const timeline = document.getElementById("timeline");
 const timelineNote = document.getElementById("timelineNote");
 const timelinePrev = document.getElementById("timelinePrev");
@@ -31,29 +33,28 @@ const zoomReadout = document.getElementById("zoomReadout");
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 4;
 
-/** Align with server `normalizeClassificationString`: commercial | cargo | military; legacy maps into these. */
+/** Align with server `normalizeClassificationString`: military | civilian (civilian = non-military). Legacy tri-class maps here. */
 function canonicalPlaneCategory(raw) {
   const v = String(raw ?? "").trim().toLowerCase();
   if (v === "military") return "military";
-  if (v === "cargo") return "cargo";
-  if (v === "commercial") return "commercial";
-  if (v === "civilian" || v === "private" || v === "business" || v === "helicopter" || v === "unknown") {
-    return "commercial";
-  }
-  return "commercial";
+  return "civilian";
 }
 
-const COMPOSITION_ORDER = ["commercial", "cargo", "military"];
+const COMPOSITION_ORDER = ["civilian", "military"];
+
+const COMPOSITION_LABELS = {
+  civilian: "Civilian",
+  military: "Military",
+};
 
 const typeColors = {
-  commercial: "#6fb6ff",
-  cargo: "#a8d66d",
+  civilian: "#6fb6ff",
   military: "#ff8b72",
 };
 
-/** Roll mixed/legacy timeline rows into the three display buckets. */
+/** Roll mixed/legacy timeline rows into civilian vs military buckets. */
 function aggregateTimelinePoint(point) {
-  const acc = { commercial: 0, cargo: 0, military: 0 };
+  const acc = { civilian: 0, military: 0 };
   for (const [key, val] of Object.entries(point)) {
     if (key === "date") continue;
     const n = Number(val) || 0;
@@ -285,7 +286,7 @@ function drawAircraftMarker(aircraft, rect, analysis, dimPrevious = false) {
   const by = usePixels ? rect.y + (bbox.y / ih) * rect.height : rect.y + bbox.y * rect.height;
 
   const color =
-    typeColors[canonicalPlaneCategory(aircraft.classification || aircraft.type)] || typeColors.commercial;
+    typeColors[canonicalPlaneCategory(aircraft.classification || aircraft.type)] || typeColors.civilian;
   const alpha = dimPrevious ? 0.35 : 0.9;
   const confidence = aircraft.classificationConfidence || aircraft.detectionConfidence || 0.5;
 
@@ -404,8 +405,7 @@ function syncAirfieldSelect() {
 
 /** Deltas vs prior capture for the selected frame (not global latest-vs-prior). */
 const ZERO_COMPOSITION_DELTA = Object.freeze({
-  commercial: 0,
-  cargo: 0,
+  civilian: 0,
   military: 0,
 });
 
@@ -426,48 +426,14 @@ function renderComposition(report) {
     const delta = report.deltas[type] ?? 0;
     const deltaText = delta > 0 ? `+${delta}` : String(delta);
     card.innerHTML = `
-      <span class="type-dot" style="background:${typeColors[type] || typeColors.commercial}"></span>
-      <strong>${count}</strong>
-      <span>${type}</span>
-      <em>${deltaText}</em>
+      <span class="type-dot" style="background:${typeColors[type] || typeColors.civilian}"></span>
+      <div class="composition-card-body">
+        <strong>${count}</strong>
+        <span>${COMPOSITION_LABELS[type] || type}</span>
+      </div>
+      <em class="composition-delta">${deltaText}</em>
     `;
     compositionGrid.appendChild(card);
-  });
-}
-
-function renderSignals(report) {
-  signalList.innerHTML = "";
-  const signals = Array.isArray(report.signals) ? report.signals : [];
-  if (!signals.length) {
-    signalList.innerHTML = '<div class="empty-copy">No change signals for this view.</div>';
-    return;
-  }
-  signals.forEach((signal) => {
-    const row = document.createElement("div");
-    row.className = "category-row";
-    row.innerHTML = `
-      <span>${signal.label}</span>
-      <strong class="${getSeverityClass(signal.severity)}-text">${signal.value}</strong>
-    `;
-    signalList.appendChild(row);
-  });
-}
-
-function renderFindings(report) {
-  findingsList.innerHTML = "";
-  report.findings.forEach((finding) => {
-    const card = document.createElement("article");
-    card.className = "finding-item";
-    card.innerHTML = `
-      <div class="finding-topline">
-        <span class="status-pill ${getSeverityClass(finding.severity)}">${finding.severity}</span>
-        <span>${Math.round(finding.confidence * 100)}%</span>
-      </div>
-      <h3>${finding.title}</h3>
-      <p>${finding.explanation}</p>
-      <div class="next-step">${finding.nextStep}</div>
-    `;
-    findingsList.appendChild(card);
   });
 }
 
@@ -518,7 +484,7 @@ function renderTimeline(report) {
       if (!value) return;
       const segment = document.createElement("span");
       segment.style.height = `${Math.max(5, (value / maxTotal) * 100)}%`;
-      segment.style.background = typeColors[type] || typeColors.commercial;
+      segment.style.background = typeColors[type] || typeColors.civilian;
       stack.appendChild(segment);
     });
 
@@ -547,6 +513,7 @@ function renderCaptureControls(report) {
     nextCapture.disabled = true;
     refreshAnalysisBtn.disabled = true;
     if (reclassifyAnalysisBtn) reclassifyAnalysisBtn.disabled = true;
+    if (refreshSummaryBtn) refreshSummaryBtn.disabled = true;
     if (timelinePrev) timelinePrev.disabled = true;
     if (timelineNext) timelineNext.disabled = true;
     return;
@@ -566,6 +533,7 @@ function renderCaptureControls(report) {
   nextCapture.disabled = index >= captures.length - 1;
   refreshAnalysisBtn.disabled = false;
   if (reclassifyAnalysisBtn) reclassifyAnalysisBtn.disabled = false;
+  if (refreshSummaryBtn) refreshSummaryBtn.disabled = false;
   if (timelinePrev) timelinePrev.disabled = previousCapture.disabled;
   if (timelineNext) timelineNext.disabled = nextCapture.disabled;
 }
@@ -601,22 +569,70 @@ function renderReportDetails() {
   viewerSubtitle.textContent = selectedCapture
     ? `Local capture ${state.captureIndex + 1} of ${(report.images || []).length} with aircraft boxes`
     : "Synthetic placeholder imagery until local captures are supplied";
-  riskBand.textContent = report.status;
-  riskBand.className = `status-pill ${getSeverityClass(report.riskBand)}`;
-  summaryText.textContent = report.summary;
+  const ss = report.seriesSummary;
+  if (summaryAnomalyBadge) {
+    const showAnomaly = ss?.anomalous === true;
+    summaryAnomalyBadge.classList.toggle("is-hidden", !showAnomaly);
+  }
+
+  const unexpected = Array.isArray(ss?.unexpectedObservations) ? ss.unexpectedObservations : [];
+  if (ss && (ss.narrative || ss.headline || unexpected.length)) {
+    if (summaryHeadline) {
+      summaryHeadline.textContent = ss.headline ? String(ss.headline) : "";
+      summaryHeadline.classList.toggle("is-hidden", !ss.headline);
+    }
+    summaryText.textContent =
+      ss.narrative != null && String(ss.narrative).trim() !== ""
+        ? String(ss.narrative)
+        : report.summary;
+    summaryText.classList.add("summary-text--primary");
+    if (summaryCoherence) {
+      summaryCoherence.textContent = "";
+      if (unexpected.length) {
+        const ul = document.createElement("ul");
+        ul.className = "summary-unexpected-list";
+        unexpected.forEach((item) => {
+          const title = item?.title != null ? String(item.title).trim() : "";
+          const explanation = item?.explanation != null ? String(item.explanation).trim() : "";
+          if (!title && !explanation) return;
+          const li = document.createElement("li");
+          const sev = ["high", "medium", "low"].includes(item?.severity) ? item.severity : "low";
+          const strong = document.createElement("strong");
+          strong.className = `summary-unexpected-title ${getSeverityClass(sev)}-text`;
+          strong.textContent = title || "Note";
+          li.appendChild(strong);
+          li.appendChild(document.createTextNode(` ${explanation}`));
+          ul.appendChild(li);
+        });
+        summaryCoherence.appendChild(ul);
+        summaryCoherence.classList.toggle("is-hidden", ul.childElementCount === 0);
+      } else {
+        summaryCoherence.classList.add("is-hidden");
+      }
+    }
+    if (summarySeriesMeta && (report.images || []).length > 0) {
+      summarySeriesMeta.textContent = ss.summaryFromCache ? "Summary from cache" : "";
+    }
+  } else {
+    if (summaryHeadline) summaryHeadline.classList.add("is-hidden");
+    summaryText.textContent = report.summary;
+    summaryText.classList.remove("summary-text--primary");
+    if (summaryCoherence) {
+      summaryCoherence.textContent = "";
+      summaryCoherence.classList.add("is-hidden");
+    }
+    if (summarySeriesMeta) summarySeriesMeta.textContent = "";
+  }
 
   syncAirfieldSelect();
   renderComposition({ ...report, composition: selectedComposition, deltas: compositionDeltas });
-  renderSignals(report);
-  renderFindings(report);
   renderTimeline(report);
   renderCaptureControls(report);
 }
 
 function countComposition(planes) {
   const counts = {
-    commercial: 0,
-    cargo: 0,
+    civilian: 0,
     military: 0,
   };
   planes.forEach((plane) => {
@@ -646,7 +662,16 @@ function normalizeAirportCode(airportCode) {
   return String(airportCode || "").trim().toLowerCase();
 }
 
-async function loadReport(airportCode, refreshAnalysis = false) {
+async function loadReport(airportCode, opts = {}) {
+  let refreshAnalysis = false;
+  let refreshSummary = false;
+  if (opts === true) {
+    refreshAnalysis = true;
+  } else if (opts && typeof opts === "object") {
+    refreshAnalysis = opts.refreshAnalysis === true;
+    refreshSummary = opts.refreshSummary === true;
+  }
+
   const normalizedAirportCode = normalizeAirportCode(airportCode);
   state.selectedAirportCode = normalizedAirportCode;
   syncAirfieldSelect();
@@ -664,7 +689,10 @@ async function loadReport(airportCode, refreshAnalysis = false) {
     /* overlay without backdrop */
   }
   try {
-    const query = refreshAnalysis ? "?refresh=1" : "";
+    const params = new URLSearchParams();
+    if (refreshAnalysis) params.set("refresh", "1");
+    if (refreshSummary) params.set("summaryRefresh", "1");
+    const query = params.toString() ? `?${params.toString()}` : "";
     const response = await fetch(`/api/airfields/${encodeURIComponent(normalizedAirportCode)}${query}`);
     if (!response.ok) throw new Error(`Unable to load ${normalizedAirportCode}`);
     state.report = await response.json();
@@ -777,19 +805,43 @@ refreshAnalysisBtn.addEventListener("click", () => {
   const prevLabel = refreshAnalysisBtn.textContent;
   refreshAnalysisBtn.disabled = true;
   if (reclassifyAnalysisBtn) reclassifyAnalysisBtn.disabled = true;
+  if (refreshSummaryBtn) refreshSummaryBtn.disabled = true;
   previousCapture.disabled = true;
   nextCapture.disabled = true;
   captureSelect.disabled = true;
   if (timelinePrev) timelinePrev.disabled = true;
   if (timelineNext) timelineNext.disabled = true;
   refreshAnalysisBtn.textContent = "Refreshing…";
-  loadReport(code, true)
+  loadReport(code, { refreshAnalysis: true })
     .catch(console.error)
     .finally(() => {
       refreshAnalysisBtn.textContent = prevLabel;
       renderReportDetails();
     });
 });
+
+if (refreshSummaryBtn) {
+  refreshSummaryBtn.addEventListener("click", () => {
+    const code = state.report?.code || normalizeAirportCode(airfieldSelect?.value);
+    if (!code) return;
+    const prevLabel = refreshSummaryBtn.textContent;
+    refreshSummaryBtn.disabled = true;
+    refreshAnalysisBtn.disabled = true;
+    if (reclassifyAnalysisBtn) reclassifyAnalysisBtn.disabled = true;
+    previousCapture.disabled = true;
+    nextCapture.disabled = true;
+    captureSelect.disabled = true;
+    if (timelinePrev) timelinePrev.disabled = true;
+    if (timelineNext) timelineNext.disabled = true;
+    refreshSummaryBtn.textContent = "Summarizing…";
+    loadReport(code, { refreshSummary: true })
+      .catch(console.error)
+      .finally(() => {
+        refreshSummaryBtn.textContent = prevLabel;
+        renderReportDetails();
+      });
+  });
+}
 
 if (reclassifyAnalysisBtn) {
   reclassifyAnalysisBtn.addEventListener("click", () => {
@@ -798,6 +850,7 @@ if (reclassifyAnalysisBtn) {
     const prevLabel = reclassifyAnalysisBtn.textContent;
     refreshAnalysisBtn.disabled = true;
     reclassifyAnalysisBtn.disabled = true;
+    if (refreshSummaryBtn) refreshSummaryBtn.disabled = true;
     previousCapture.disabled = true;
     nextCapture.disabled = true;
     captureSelect.disabled = true;
@@ -814,7 +867,7 @@ if (reclassifyAnalysisBtn) {
         if (payload.skipped?.length) {
           console.warn("[reclassify] skipped images:", payload.skipped);
         }
-        return loadReport(code, false);
+        return loadReport(code);
       })
       .catch(console.error)
       .finally(() => {
