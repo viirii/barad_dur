@@ -4,7 +4,9 @@
  * so the duplicate airfield reuses HF + OpenAI classify results without re-inference.
  *
  * Usage: node scripts/clone_airfield_data.js <srcCode> <dstCode>
- * Example: node scripts/clone_airfield_data.js sfo sfx
+ * Examples:
+ *   node scripts/clone_airfield_data.js sfo sfx
+ *   node scripts/clone_airfield_data.js suu sux
  */
 const fs = require("fs");
 const path = require("path");

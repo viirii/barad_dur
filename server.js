@@ -50,7 +50,7 @@ const analysisCacheRoot = path.join(root, "data", "analysis-cache");
 const classificationCacheRoot = path.join(root, "data", "classification-cache");
 const summaryCacheRoot = path.join(root, "data", "summary-cache");
 /** Bump when the series-summary prompt or schema meaning changes (cache fingerprint salt). */
-const SERIES_SUMMARY_PROMPT_VERSION = "v3-anomaly-latest-vs-history";
+const SERIES_SUMMARY_PROMPT_VERSION = "v4-canonical-airfield-in-prompt";
 const openaiApiKey = process.env.OPENAI_API_KEY || "";
 const openaiModel = process.env.OPENAI_MODEL || "gpt-5.5";
 
@@ -58,7 +58,7 @@ const openaiModel = process.env.OPENAI_MODEL || "gpt-5.5";
  * Mixed into `hashResolvedImagePath` so OpenAI `by-path` entries under `analysis-cache` miss completions from older prompts.
  * Bump when classify/vision instructions or JSON schema semantics change materially.
  */
-const OPENAI_PATH_CACHE_VERSION = "classify-v6-high-sensitivity";
+const OPENAI_PATH_CACHE_VERSION = "classify-v8-canonical-airfield-in-prompt";
 
 /**
  * Max concurrent `analyze_image` runs per airfield load (order preserved).
@@ -343,6 +343,75 @@ const airfieldReports = {
       { x: 0.77, y: 0.63, type: "civilian", confidence: 0.39, angle: 12 },
     ],
   },
+  /** Demo airfield: same baseline story as SUU; imagery & caches cloned from SUU under data/airfields/sux. */
+  sux: {
+    id: "sux",
+    code: "SUX",
+    name: "SUX — SUU mirror (demo)",
+    type: "Military airfield",
+    status: "Needs review",
+    riskBand: "needs_review",
+    lastCapture: "2026-05-01 19:05 UTC",
+    baseline: "large military transport/tanker aircraft expected",
+    summary:
+      "Placeholder profile matches SUU. Local imagery under data/airfields/sux is a copy of SUU captures for side-by-side or modified-image experiments.",
+    composition: {
+      military: 18,
+      civilian: 6,
+    },
+    deltas: {
+      military: 9,
+      civilian: 3,
+    },
+    timeline: [
+      { date: "Apr 18", military: 8, civilian: 3 },
+      { date: "Apr 22", military: 10, civilian: 3 },
+      { date: "Apr 26", military: 9, civilian: 3 },
+      { date: "May 01", military: 18, civilian: 6 },
+    ],
+    signals: [
+      { label: "Aircraft count", value: "+12 vs prior capture", severity: "high" },
+      { label: "Type mix", value: "Military dominant", severity: "low" },
+      { label: "Concentration", value: "Eastern apron buildup", severity: "high" },
+      { label: "Decoy / painted risk", value: "1 ambiguous flat-looking region", severity: "medium" },
+    ],
+    findings: [
+      {
+        title: "Military aircraft concentration increased",
+        severity: "high",
+        confidence: 0.74,
+        explanation:
+          "The latest capture shows a sharp increase of military-style aircraft-like objects on the eastern apron relative to the rolling baseline.",
+        nextStep: "Compare with adjacent imagery and known exercise, maintenance, or weather displacement context.",
+      },
+      {
+        title: "Possible decoy or flat aircraft-like marking",
+        severity: "medium",
+        confidence: 0.53,
+        explanation:
+          "One aircraft-like shape has weaker shadow contact and flatter texture than nearby aircraft-like objects.",
+        nextStep: "Review a different sun angle or higher-resolution capture before treating it as a physical aircraft.",
+      },
+      {
+        title: "Military aircraft expected at this airfield",
+        severity: "low",
+        confidence: 0.91,
+        explanation:
+          "The presence of military transport/tanker-style aircraft is consistent with Travis AFB baseline; the anomaly is the concentration change, not the type alone.",
+        nextStep: "Prioritize count, parking-zone shift, and temporal behavior over one-off object presence.",
+      },
+    ],
+    aircraft: [
+      { x: 0.21, y: 0.27, type: "military", confidence: 0.82, angle: -12 },
+      { x: 0.28, y: 0.31, type: "military", confidence: 0.84, angle: -12 },
+      { x: 0.35, y: 0.35, type: "military", confidence: 0.8, angle: -12 },
+      { x: 0.47, y: 0.42, type: "military", confidence: 0.77, angle: 8 },
+      { x: 0.55, y: 0.46, type: "military", confidence: 0.79, angle: 8 },
+      { x: 0.63, y: 0.51, type: "military", confidence: 0.76, angle: 8 },
+      { x: 0.71, y: 0.58, type: "civilian", confidence: 0.44, angle: 12 },
+      { x: 0.77, y: 0.63, type: "civilian", confidence: 0.39, angle: 12 },
+    ],
+  },
   oak: {
     id: "oak",
     code: "OAK",
@@ -401,6 +470,55 @@ const airfieldReports = {
       { x: 0.64, y: 0.61, type: "civilian", confidence: 0.41, angle: 14 },
     ],
   },
+  sjc: {
+    id: "sjc",
+    code: "SJC",
+    name: "San Jose Mineta International Airport",
+    type: "Commercial airport",
+    status: "Normal",
+    riskBand: "normal",
+    lastCapture: "2026-05-01 17:45 UTC",
+    baseline: "commercial passenger and regional traffic expected",
+    summary:
+      "SJC activity in this placeholder profile remains consistent with a commercial airport, with civilian aircraft dominance and no unusual military mix.",
+    composition: {
+      civilian: 28,
+      military: 0,
+    },
+    deltas: {
+      civilian: 2,
+      military: 0,
+    },
+    timeline: [
+      { date: "Apr 18", civilian: 24, military: 0 },
+      { date: "Apr 22", civilian: 25, military: 0 },
+      { date: "Apr 26", civilian: 26, military: 0 },
+      { date: "May 01", civilian: 28, military: 0 },
+    ],
+    signals: [
+      { label: "Aircraft count", value: "Within baseline", severity: "low" },
+      { label: "Type mix", value: "Civilian dominant", severity: "low" },
+      { label: "Military-style aircraft", value: "None detected", severity: "low" },
+      { label: "Uncertain regions", value: "1 peripheral ambiguous shape", severity: "low" },
+    ],
+    findings: [
+      {
+        title: "Commercial traffic baseline",
+        severity: "low",
+        confidence: 0.85,
+        explanation:
+          "Aircraft-like objects are concentrated around terminal and apron areas, consistent with expected SJC operations.",
+        nextStep: "Use additional captures only if investigating a specific deviation threshold.",
+      },
+    ],
+    aircraft: [
+      { x: 0.24, y: 0.28, type: "civilian", confidence: 0.86, angle: -7 },
+      { x: 0.33, y: 0.33, type: "civilian", confidence: 0.88, angle: -7 },
+      { x: 0.45, y: 0.39, type: "civilian", confidence: 0.8, angle: 5 },
+      { x: 0.56, y: 0.46, type: "civilian", confidence: 0.77, angle: 5 },
+      { x: 0.68, y: 0.53, type: "civilian", confidence: 0.64, angle: 11 },
+    ],
+  },
 };
 
 function isImageFile(fileName) {
@@ -427,6 +545,38 @@ function toCaptureDateFromFileName(fileName) {
 
 function normalizeAirportCode(airportCode) {
   return String(airportCode || "").trim().toLowerCase();
+}
+
+/**
+ * Demo mirror folders (sfx/sux) reuse another base’s imagery role in **model prompts only**:
+ * pass SFO / San Francisco and SUU / Travis identities instead of the mirror codes.
+ */
+function getAirfieldCatalogReportForPrompts(airportCode) {
+  const key = normalizeAirportCode(airportCode);
+  if (key === "sfx") return airfieldReports.sfo;
+  if (key === "sux") return airfieldReports.suu;
+  return airfieldReports[key] || null;
+}
+
+function getAirfieldCatalogIdentityForSeriesSummary(report) {
+  if (!report) return null;
+  const key = normalizeAirportCode(report.code);
+  if (key === "sfx") return airfieldReports.sfo;
+  if (key === "sux") return airfieldReports.suu;
+  return report;
+}
+
+/** Code + catalog name + type for vision prompts (canonical identity for demo mirrors). */
+function getAirfieldLabelForClassificationPrompt(airportCode) {
+  const report = getAirfieldCatalogReportForPrompts(airportCode);
+  const codeUpper = String(report?.code || "").trim().toUpperCase();
+  if (!report || !codeUpper) {
+    const k = (String(airportCode || "").trim() || "unknown").toUpperCase();
+    return `${k} — catalog unknown; use silhouette and image only`;
+  }
+  const name = String(report.name || "").trim();
+  const type = String(report.type || "").trim() || "unknown";
+  return name ? `${codeUpper} — ${name} — ${type}` : `${codeUpper} — ${type}`;
 }
 
 function toPublicImagePath(airportCode, fileName) {
@@ -597,6 +747,7 @@ function getClassificationCachePath(airportCode, image) {
   return path.join(cacheDir, `${getImageCacheFileBase(image)}.json`);
 }
 
+/** Written only after HF boxes + successful OpenAI classify (`hf_yolo_openai`); not created for `hf_yolo` stub-only or failed classify. */
 function writeClassificationCache(airportCode, image, payload) {
   const cachePath = getClassificationCachePath(airportCode, image);
   if (!cachePath) return;
@@ -708,7 +859,8 @@ function hashString(value) {
 
 function identify_planes_scaffold(image, airportCode) {
   const seed = hashString(`${airportCode}:${image.id}:${image.capturedAt}`);
-  const count = airportCode === "suu" ? 4 + (seed % 7) : 8 + (seed % 10);
+  const travisLike = airportCode === "suu" || airportCode === "sux";
+  const count = travisLike ? 4 + (seed % 7) : 8 + (seed % 10);
 
   return Array.from({ length: count }, (_, index) => {
     const row = Math.floor(index / 4);
@@ -717,8 +869,8 @@ function identify_planes_scaffold(image, airportCode) {
     const jitterY = ((seed + index * 29) % 11) / 100;
     const x = Math.min(0.9, 0.16 + column * 0.18 + jitterX);
     const y = Math.min(0.86, 0.22 + row * 0.16 + jitterY);
-    const width = airportCode === "suu" ? 0.065 : 0.08;
-    const height = airportCode === "suu" ? 0.038 : 0.046;
+    const width = travisLike ? 0.065 : 0.08;
+    const height = travisLike ? 0.038 : 0.046;
 
     return {
       id: `${image.id}-plane-${index + 1}`,
@@ -732,7 +884,7 @@ function identify_planes_scaffold(image, airportCode) {
 function classify_planes_scaffold(planeDetections, image, airportCode) {
   return planeDetections.map((plane, index) => {
     let classification = "civilian";
-    if (airportCode === "suu") {
+    if (airportCode === "suu" || airportCode === "sux") {
       classification = index % 3 === 0 ? "military" : "civilian";
     } else if (index % 11 === 9) {
       classification = "military";
@@ -1071,7 +1223,7 @@ function getAircraftClassificationOnlySchema() {
   return {
     type: "object",
     additionalProperties: false,
-    required: ["planes", "imageQuality", "notes"],
+    required: ["planes", "additionalAircraft", "imageQuality", "notes"],
     properties: {
       planes: {
         type: "array",
@@ -1080,7 +1232,7 @@ function getAircraftClassificationOnlySchema() {
       additionalAircraft: {
         type: "array",
         description:
-          "Optional: distinct aircraft clearly visible in the image that were NOT in the pre-listed boxes. Omit entirely if none meet the certainty bar.",
+          "Distinct aircraft clearly visible in the image that were NOT in the pre-listed boxes. Return an empty array if none meet the certainty bar.",
         items: additionalAircraftItem,
       },
       imageQuality: {
@@ -1241,11 +1393,13 @@ function buildOpenAiClassificationOnlyPrompt(detectionPayload, imageDims, airpor
     "Rules (listed detections):",
     "  • Output exactly one JSON row per input id; copy each id string exactly. Do not change bbox numbers for listed ids.",
     "  • Classification enum per plane: civilian | military (exactly one).",
-    "  • DECISION ORDER: First ask — does this crop look military (tactical jet proportions, tanker/military transport helo layout)? If not → civilian. Civilian includes passenger, cargo/freighter, GA, bizjet, civilian helicopter — any non-military aircraft.",
-    "  • SILHOUETTE FIRST: military = compact/tactical jets, strongly swept or delta wings, short fuselage vs wingspan. civilian = everything else that is clearly an aircraft but not military-looking.",
-    "  • Never pick civilian for objects that look like fighters or tactical jets just because the airfield code suggests a civilian hub.",
+    "  • DECISION ORDER: (1) If the crop clearly reads as non-military (typical narrow-body airliner tube, obvious civilian GA/bizjet/helo with no tactical cues) → civilian. (2) If it clearly reads as military (tactical jet, tanker, military transport, military helo) → military. (3) If ambiguous after silhouette review, apply the airfield line below: at military installations lean military; at commercial airports still never force-civilian on tactical shapes.",
+    "  • SILHOUETTE FIRST: military includes compact/tactical jets, strongly swept or delta wings, short fuselage vs wingspan, tankers, strategic/tactical transports, ISR stacks, military helos. civilian = clearly non-military aircraft.",
+    "  • Military airfields (see Airfield context): transports and tankers often look like 'fat' or high-wing bodies in satellite view — do NOT default those to civilian airliners. When shape could reasonably be C-17/C-5/KC-135-class or similar, prefer military.",
+    "  • Demo imagery folders: the Airfield context line already uses the **operational** base identity (e.g. SFO or SUU); trust that line for priors, not the on-disk folder code.",
+    "  • Never pick civilian for objects that look like fighters or tactical jets just because the scene looks like a busy civilian airport.",
     "  • If unsure between military and civilian, prefer military when wings dominate and the fuselage is short relative to wingspan.",
-    "  • Use apron/terminal context only as a weak tie-breaker after shape.",
+    "  • Use apron/terminal context only as a weak tie-breaker after shape, except the explicit military/commercial **type** in Airfield context may break ties on ambiguous transports.",
     "",
     "Additional aircraft (optional — strict bar):",
     "  • After classifying all listed boxes, scan the full image for DISTINCT aircraft that were clearly missed (detector false negative).",
@@ -1259,7 +1413,7 @@ function buildOpenAiClassificationOnlyPrompt(detectionPayload, imageDims, airpor
     "Pre-detected aircraft (classify each row — keep bbox coordinates unchanged):",
     JSON.stringify(detectionPayload, null, 2),
     "",
-    `Airfield context (ICAO/IATA or slug): ${airportLabel}`,
+    `Airfield context (code — name — type from catalog): ${airportLabel}`,
   ].join("\n");
 }
 
@@ -1515,7 +1669,7 @@ async function runOpenAiClassificationForHfOnce(absPath, image, airportCode, pla
       angle: p.angle,
       source: p.source,
     }));
-    const airportLabel = String(airportCode || "").trim() || "unknown";
+    const airportLabel = getAirfieldLabelForClassificationPrompt(airportCode);
     const promptText = buildOpenAiClassificationOnlyPrompt(detectionPayload, imageDims, airportLabel);
     const parsed = await createOpenAIJsonResponse({
       imageUrl,
@@ -1567,8 +1721,8 @@ async function analyze_image_with_openai(image, airportCode) {
     capturePath && fs.existsSync(capturePath) ? readImageDimensionsFromFile(capturePath) : null;
 
   const imageUrl = getImageDataUrl(image, airportCode);
-  const airportLabel = String(airportCode || "").trim() || "unknown";
-  const promptText = `${buildOpenAiAircraftPrompt(imageDims)}\n\nAirfield context (ICAO/IATA or slug): ${airportLabel}.`;
+  const airportLabel = getAirfieldLabelForClassificationPrompt(airportCode);
+  const promptText = `${buildOpenAiAircraftPrompt(imageDims)}\n\nAirfield context (code — name — type from catalog): ${airportLabel}.`;
 
   const parsed = await createOpenAIJsonResponse({
     imageUrl,
@@ -2256,7 +2410,8 @@ function getAirfieldSeriesSummarySchema() {
 }
 
 function buildAirfieldSeriesSummaryPrompt(report, images, imageAnalyses) {
-  const code = String(report.code || "").trim();
+  const identity = getAirfieldCatalogIdentityForSeriesSummary(report);
+  const code = String(identity?.code || report.code || "").trim();
   const rows = images.map((img, i) => {
     const a = imageAnalyses[i];
     const comp = a ? countPlaneTypes(a.planes || []) : { civilian: 0, military: 0 };
@@ -2286,8 +2441,8 @@ function buildAirfieldSeriesSummaryPrompt(report, images, imageAnalyses) {
     "Do NOT: mention model names, APIs, software, detector settings, or pipeline steps. Do NOT structure the narrative around consecutive capture pairs or 'vs the previous image'. You may describe multi-date trends (e.g. build-up over several captures).",
     "",
     `Airport code: ${code}`,
-    `Airfield type (from catalog): ${report.type || "unknown"}`,
-    `Name: ${report.name || ""}`,
+    `Airfield type (from catalog): ${identity?.type || report.type || "unknown"}`,
+    `Name: ${identity?.name || report.name || ""}`,
     `Number of dated captures in this series: ${images.length}`,
     "",
     "Counts per capture (civilian / military / total detections). The array is chronological; the last object is the latest snapshot to compare against all earlier ones:",

@@ -22,8 +22,10 @@
             <span>Airport</span>
             <select id="airfieldSelect" class="airfield-select" aria-label="Airport">
               <option value="suu">SUU — Travis AFB</option>
+              <option value="sux">SUX — SUU mirror (demo)</option>
               <option value="sfo">SFO — San Francisco</option>
               <option value="sfx">SFX — SFO mirror (demo)</option>
+              <option value="sjc">SJC — San Jose</option>
               <option value="oak" selected>OAK — Oakland</option>
             </select>
           </label>
@@ -49,6 +51,9 @@
         </section>
 
         <section class="panel">
+          <div class="section-heading section-heading--solo">
+            <h2>Layout</h2>
+          </div>
           <div class="panel-row">
             <span>Boxes</span>
             <button id="boxesToggle" class="icon-button active" type="button" aria-label="Toggle boxes" title="Toggle boxes">
@@ -56,7 +61,10 @@
             </button>
           </div>
           <label class="range-control">
-            <span>Zoom <span id="zoomReadout" class="zoom-readout">100%</span></span>
+            <span class="zoom-label">
+              <span>Zoom</span>
+              <span id="zoomReadout" class="zoom-readout">100%</span>
+            </span>
             <input
               id="zoomSlider"
               type="range"
@@ -76,6 +84,17 @@
             </div>
           </div>
         </section>
+
+        <section class="panel">
+          <div class="layout-actions">
+            <button id="refreshAnalysis" class="text-button refresh-analysis-button" type="button" title="Re-run detection on all captures and update cache" disabled>
+              Rerun detection
+            </button>
+            <button id="reclassifyAnalysis" class="text-button reclassify-analysis-button" type="button" title="Re-run OpenAI classification only using cached HF boxes (no YOLO)" disabled>
+              Rerun classification
+            </button>
+          </div>
+        </section>
       </aside>
 
       <section class="viewer-shell">
@@ -85,15 +104,11 @@
             <div class="viewer-subtitle" id="viewerSubtitle">Latest imagery and aircraft boxes</div>
           </div>
           <div class="toolbar-actions">
-            <button id="refreshAnalysis" class="text-button refresh-analysis-button" type="button" title="Re-run analysis on all captures and update cache" disabled>
-              Refresh analysis
-            </button>
-            <button id="reclassifyAnalysis" class="text-button reclassify-analysis-button" type="button" title="Re-run OpenAI classification only using cached HF boxes (no YOLO)" disabled>
-              Reclassify
-            </button>
-            <button id="previousCapture" class="text-button" type="button">Prev date</button>
-            <select id="captureSelect" class="capture-select" aria-label="Capture date"></select>
-            <button id="nextCapture" class="text-button" type="button">Next date</button>
+            <div class="toolbar-capture-nav">
+              <button id="previousCapture" class="text-button" type="button">Prev date</button>
+              <select id="captureSelect" class="capture-select" aria-label="Capture date"></select>
+              <button id="nextCapture" class="text-button" type="button">Next date</button>
+            </div>
           </div>
         </div>
 

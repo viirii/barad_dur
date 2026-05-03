@@ -396,11 +396,29 @@ h3 {
   grid-template-columns: 72px minmax(0, 1fr);
 }
 
+.zoom-label {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+}
+
 .zoom-readout {
-  margin-left: 6px;
+  margin-left: 0;
   color: var(--text);
   font-style: normal;
   font-weight: 600;
+}
+
+.layout-actions {
+  display: grid;
+  gap: 8px;
+}
+
+.layout-actions .text-button {
+  width: 100%;
+  text-align: left;
+  padding-left: 10px;
 }
 
 input[type="range"] {
@@ -534,7 +552,7 @@ input[type="range"] {
 
 .toolbar-actions {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   flex: 0 1 auto;
   justify-content: flex-end;
   align-items: center;
@@ -542,7 +560,16 @@ input[type="range"] {
   min-width: 0;
 }
 
-.toolbar-actions select.capture-select {
+.toolbar-capture-nav {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.toolbar-capture-nav .capture-select {
   min-width: 0;
   flex: 0 1 118px;
   width: auto;
@@ -563,9 +590,15 @@ input[type="range"] {
   .toolbar-actions {
     flex-basis: auto;
     justify-content: flex-start;
+    flex-wrap: wrap;
   }
 
-  .toolbar-actions select.capture-select {
+  .toolbar-capture-nav {
+    flex: 1 1 auto;
+    min-width: min(100%, 280px);
+  }
+
+  .toolbar-capture-nav .capture-select {
     max-width: none;
     flex: 1 1 100px;
   }
@@ -799,12 +832,22 @@ canvas {
 }
 
 .composition-delta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 2px;
   justify-self: end;
   color: var(--muted);
   font-size: 12px;
   font-style: normal;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+  line-height: 1.15;
+}
+
+.composition-delta span:first-child {
+  color: var(--text);
+  font-weight: 650;
 }
 
 .type-dot {

@@ -339,7 +339,7 @@ function drawReportOverlay(rect, report) {
   });
 }
 
-function getSceneRect() {
+function getBaseSceneDimensions() {
   const width = canvasWrap.clientWidth;
   const height = canvasWrap.clientHeight;
   const activeImage = state.reportImage;
@@ -347,17 +347,22 @@ function getSceneRect() {
   const ih = activeImage ? activeImage.naturalHeight || activeImage.height : 0;
   const sceneRatio = iw > 0 && ih > 0 ? iw / ih : 16 / 10;
   const viewportRatio = width / height;
-  let sceneWidth = width * 0.88;
-  let sceneHeight = sceneWidth / sceneRatio;
+  let baseW = width * 0.88;
+  let baseH = baseW / sceneRatio;
 
   if (viewportRatio > sceneRatio) {
-    sceneHeight = height * 0.86;
-    sceneWidth = sceneHeight * sceneRatio;
+    baseH = height * 0.86;
+    baseW = baseH * sceneRatio;
   }
 
+  return { width, height, baseW, baseH };
+}
+
+function getSceneRect() {
+  const { width, height, baseW, baseH } = getBaseSceneDimensions();
   const z = clamp(state.zoom, MIN_ZOOM, MAX_ZOOM);
-  sceneWidth *= z;
-  sceneHeight *= z;
+  const sceneWidth = baseW * z;
+  const sceneHeight = baseH * z;
 
   return {
     x: (width - sceneWidth) / 2 + state.panX,
@@ -365,6 +370,33 @@ function getSceneRect() {
     width: sceneWidth,
     height: sceneHeight,
   };
+}
+
+/** Zoom in toward a viewport point (e.g. double-click); keeps that spot on the same image fraction. */
+function zoomViewTowardCanvasClientPoint(clientX, clientY, multiplier = 1.35) {
+  if (!state.report) return;
+  const wrap = canvasWrap.getBoundingClientRect();
+  const mx = clientX - wrap.left;
+  const my = clientY - wrap.top;
+
+  const rect0 = getSceneRect();
+  const z0 = clamp(state.zoom, MIN_ZOOM, MAX_ZOOM);
+  const z1 = clamp(z0 * multiplier, MIN_ZOOM, MAX_ZOOM);
+  if (Math.abs(z1 - z0) < 1e-6) return;
+
+  const u = (mx - rect0.x) / rect0.width;
+  const v = (my - rect0.y) / rect0.height;
+
+  const { width, height, baseW, baseH } = getBaseSceneDimensions();
+  const w1 = baseW * z1;
+  const h1 = baseH * z1;
+
+  state.zoom = z1;
+  state.panX = mx - u * w1 - (width - w1) / 2;
+  state.panY = my - v * h1 - (height - h1) / 2;
+
+  syncZoomUi();
+  render();
 }
 
 function render() {
@@ -424,14 +456,27 @@ function renderComposition(report) {
     const card = document.createElement("div");
     card.className = "composition-card";
     const delta = report.deltas[type] ?? 0;
+    const prevCount = count - delta;
     const deltaText = delta > 0 ? `+${delta}` : String(delta);
+    let pctText = "0%";
+    if (prevCount > 0) {
+      const pct = Math.round((delta / prevCount) * 100);
+      pctText = `${pct > 0 ? "+" : ""}${pct}%`;
+    } else if (delta > 0) {
+      pctText = "+100%";
+    } else if (delta < 0) {
+      pctText = "-100%";
+    }
     card.innerHTML = `
       <span class="type-dot" style="background:${typeColors[type] || typeColors.civilian}"></span>
       <div class="composition-card-body">
         <strong>${count}</strong>
         <span>${COMPOSITION_LABELS[type] || type}</span>
       </div>
-      <em class="composition-delta">${deltaText}</em>
+      <em class="composition-delta">
+        <span>${deltaText}</span>
+        <span>${pctText}</span>
+      </em>
     `;
     compositionGrid.appendChild(card);
   });
@@ -753,6 +798,13 @@ canvasWrap.addEventListener(
   },
   { passive: false },
 );
+
+canvasWrap.addEventListener("dblclick", (event) => {
+  if (!state.report) return;
+  if (event.button !== 0) return;
+  event.preventDefault();
+  zoomViewTowardCanvasClientPoint(event.clientX, event.clientY, 1.35);
+});
 
 async function setCaptureIndex(index) {
   if (!state.report?.images?.length) return;
